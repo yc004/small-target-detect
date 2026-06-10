@@ -4,6 +4,9 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+# Always run from project root (regardless of where script is called from)
+cd "$(dirname "$0")/.."
+
 # ─── Config ──────────────────────────────────────────────────────────────────
 
 DATASET_PATH="${TT100K_PATH:-/public/data/image/TT100K}"
