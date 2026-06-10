@@ -116,6 +116,7 @@ def train(config: dict) -> None:
             conf=config.get("conf", 0.001),
             iou=config.get("iou", 0.7),
             max_det=config.get("max_det", 300),
+            amp=config.get("amp", True),
             close_mosaic=config.get("close_mosaic", 10),
             project=config.get("project", "experiments/stage1_baseline"),
             name=config.get("name", "train"),
