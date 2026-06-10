@@ -69,28 +69,27 @@ def parse_tt100k_annotations(
     ann_path: Path,
 ) -> Dict[str, List[Dict]]:
     """
-    Parse TT100K JSON annotation file.
+    Parse TT100K JSON annotation file. Supports three formats:
 
-    The TT100K annotation format (example):
+    Format A — Real TT100K (objects nested inside imgs):
     {
         "imgs": {
-            "1": {"path": "train/000001.jpg", "id": 1},
-            ...
-        },
-        "anns": {
-            "1": [
-                {"category": "i2", "bbox": {"xmin": 100, "ymin": 200, "xmax": 150, "ymax": 260}},
-                ...
-            ],
-            ...
+            "1": {"path": "train/000001.jpg", "id": 1,
+                  "objects": [{"category": "i2", "bbox": {"xmin":100,"ymin":200,...}}]}
         }
     }
 
-    Args:
-        ann_path: Path to annotations.json.
+    Format B — imgs + anns separated:
+    {
+        "imgs": {"1": {"path": "...", "id": 1}},
+        "anns": {"1": [{"category": "i2", "bbox": {...}}]}
+    }
 
-    Returns:
-        Dict mapping image_path -> list of filtered annotations.
+    Format C — COCO-style:
+    {
+        "annotations": [{"image_id": 1, "category_id": 1, "bbox": [x,y,w,h]}],
+        "images": [...], "categories": [...]
+    }
     """
     logger.info(f"Loading annotations from {ann_path}")
 
@@ -100,129 +99,101 @@ def parse_tt100k_annotations(
     imgs = data.get("imgs", {})
     anns = data.get("anns", {})
 
-    # Build path→id and id→path mappings
-    id_to_path = {}
-    for img_id, img_info in imgs.items():
-        id_to_path[img_info.get("id", img_id)] = img_info["path"]
-
+    # ── Detect format ────────────────────────────────────────────────────
     result: Dict[str, List[Dict]] = {}
 
-    for img_id, img_annotations in anns.items():
-        img_id_int = int(img_id) if img_id.isdigit() else img_id
-        img_path = id_to_path.get(img_id_int, f"train/{img_id}.jpg")
+    if imgs:
+        # Check if objects are nested inside imgs (Format A)
+        sample = next(iter(imgs.values()), {})
+        if "objects" in sample:
+            logger.info("  Detected Format A: objects nested inside imgs")
+            for img_id, img_info in imgs.items():
+                img_path = img_info.get("path", f"{img_id}.jpg")
+                objects = img_info.get("objects", [])
 
-        filtered = []
-        for ann in img_annotations:
-            category = ann.get("category", "")
-            if category in TARGET_CLASSES:
-                bbox = ann["bbox"]
-                filtered.append(
-                    {
-                        "category": category,
-                        "class_id": TARGET_CLASSES.index(category),
-                        "bbox": [
-                            int(bbox["xmin"]),
-                            int(bbox["ymin"]),
-                            int(bbox["xmax"]),
-                            int(bbox["ymax"]),
-                        ],
-                    }
-                )
+                filtered = []
+                for obj in objects:
+                    category = obj.get("category", "")
+                    if category in TARGET_CLASSES:
+                        bbox = obj["bbox"]
+                        filtered.append({
+                            "category": category,
+                            "class_id": TARGET_CLASSES.index(category),
+                            "bbox": [
+                                int(bbox["xmin"]), int(bbox["ymin"]),
+                                int(bbox["xmax"]), int(bbox["ymax"]),
+                            ],
+                        })
+                if filtered:
+                    result[img_path] = filtered
 
-        if filtered:
-            result[img_path] = filtered
+        elif anns:
+            # Format B: imgs + anns separated
+            logger.info("  Detected Format B: imgs + anns separated")
+            id_to_path = {}
+            for img_id, img_info in imgs.items():
+                id_to_path[int(img_info.get("id", img_id))] = img_info["path"]
+
+            for img_id, img_annotations in anns.items():
+                img_path = id_to_path.get(int(img_id), f"train/{img_id}.jpg")
+                filtered = []
+                for ann in img_annotations:
+                    category = ann.get("category", "")
+                    if category in TARGET_CLASSES:
+                        bbox = ann["bbox"]
+                        filtered.append({
+                            "category": category,
+                            "class_id": TARGET_CLASSES.index(category),
+                            "bbox": [
+                                int(bbox["xmin"]), int(bbox["ymin"]),
+                                int(bbox["xmax"]), int(bbox["ymax"]),
+                            ],
+                        })
+                if filtered:
+                    result[img_path] = filtered
+        else:
+            logger.warning("  imgs dict found but no 'objects' or 'anns' key")
+
+    # Format C: COCO-style
+    if not result and "annotations" in data:
+        logger.info("  Detected Format C: COCO-style")
+        cat_id_to_name = {}
+        for cat in data.get("categories", []):
+            name = cat.get("name", cat.get("category", ""))
+            cat_id_to_name[cat["id"]] = name
+
+        target_ids = set()
+        for cls in TARGET_CLASSES:
+            for cid, cname in cat_id_to_name.items():
+                if cname == cls:
+                    target_ids.add(cid)
+
+        img_id_to_name = {}
+        for img in data.get("images", []):
+            img_id_to_name[img["id"]] = img.get("file_name", f"{img['id']:06d}.jpg")
+
+        for ann in data["annotations"]:
+            cat_id = ann.get("category_id", -1)
+            if cat_id not in target_ids:
+                continue
+            cat_name = cat_id_to_name.get(cat_id, "unknown")
+            bbox = ann["bbox"]
+            file_name = img_id_to_name.get(ann["image_id"], f"{ann['image_id']:06d}.jpg")
+
+            if file_name not in result:
+                result[file_name] = []
+            result[file_name].append({
+                "category": cat_name,
+                "class_id": TARGET_CLASSES.index(cat_name) if cat_name in TARGET_CLASSES else 0,
+                "bbox": [
+                    int(bbox[0]), int(bbox[1]),
+                    int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3]),
+                ],
+            })
 
     logger.info(
         f"Found {len(result)} images with {sum(len(v) for v in result.values())} "
         f"annotations across {len(TARGET_CLASSES)} classes"
-    )
-    return result
-
-
-def parse_tt100k_alt_format(ann_path: Path) -> Dict[str, List[Dict]]:
-    """
-    Parse alternative TT100K format where the JSON is organized differently.
-
-    Some versions of TT100K have annotations organized as:
-    {
-        "annotations": [
-            {"image_id": 1, "category_id": 1, "bbox": [x, y, w, h]},
-            ...
-        ],
-        "images": [...],
-        "categories": [...]
-    }
-
-    Where categories for our targets are mapped as:
-    i2→?, i4→?, i5→?, io→?, p10→?
-    """
-    with open(ann_path, "r") as f:
-        data = json.load(f)
-
-    # Detect format
-    if "annotations" not in data:
-        return parse_tt100k_annotations(ann_path)
-
-    # Build category mapping (TT100K name → id)
-    cat_name_to_id = {}
-    cat_id_to_name = {}
-    for cat in data.get("categories", []):
-        name = cat.get("name", cat.get("category", ""))
-        cat_name_to_id[name] = cat["id"]
-        cat_id_to_name[cat["id"]] = name
-
-    # Find target class IDs
-    target_ids = set()
-    for cls in TARGET_CLASSES:
-        if cls in cat_name_to_id:
-            target_ids.add(cat_name_to_id[cls])
-
-    if not target_ids:
-        logger.warning(
-            f"Could not find target classes {TARGET_CLASSES} in categories. "
-            f"Available: {list(cat_name_to_id.keys())[:20]}"
-        )
-        return {}
-
-    # Build image id → file_name mapping
-    img_id_to_name = {}
-    for img in data.get("images", []):
-        file_name = img.get("file_name", f"{img['id']:06d}.jpg")
-        img_id_to_name[img["id"]] = file_name
-
-    # Group annotations by image
-    result: Dict[str, List[Dict]] = {}
-    for ann in data["annotations"]:
-        cat_id = ann.get("category_id", -1)
-        if cat_id not in target_ids:
-            continue
-
-        cat_name = cat_id_to_name.get(cat_id, "unknown")
-        bbox = ann["bbox"]  # COCO format: [x, y, w, h]
-
-        file_name = img_id_to_name.get(ann["image_id"], f"{ann['image_id']:06d}.jpg")
-
-        if file_name not in result:
-            result[file_name] = []
-
-        result[file_name].append(
-            {
-                "category": cat_name,
-                "class_id": TARGET_CLASSES.index(cat_name)
-                if cat_name in TARGET_CLASSES
-                else 0,
-                "bbox": [
-                    int(bbox[0]),
-                    int(bbox[1]),
-                    int(bbox[0] + bbox[2]),
-                    int(bbox[1] + bbox[3]),
-                ],
-            }
-        )
-
-    logger.info(
-        f"Found {len(result)} images with {sum(len(v) for v in result.values())} "
-        f"annotations (alt format)"
     )
     return result
 
@@ -470,11 +441,8 @@ def prepare_dataset(
             f"Please place the TT100K annotations.json in {data_dir}"
         )
 
-    # Parse annotations
+    # Parse annotations (unified parser handles all 3 formats)
     annotations = parse_tt100k_annotations(ann_file)
-    if not annotations:
-        logger.info("Trying alternative format...")
-        annotations = parse_tt100k_alt_format(ann_file)
 
     if not annotations:
         raise ValueError(

@@ -59,9 +59,10 @@ else
         log "  YOLO-format ZIP detected, filtering 5 target classes..."
         python data/extract_dataset.py --zip_path "$YOLO_ZIP" --output_dir "$OUTPUT_DIR"
 
-    elif [ -f "$SRC/annotations.json" ]; then
-        log "  Found annotations.json, converting..."
-        python data/prepare_dataset.py --data_dir "$SRC" --output_dir "$OUTPUT_DIR"
+    elif [ -f "$SRC/annotations_all.json" ] || [ -f "$SRC/annotations.json" ]; then
+        ANN_FILE=$( [ -f "$SRC/annotations_all.json" ] && echo "$SRC/annotations_all.json" || echo "$SRC/annotations.json" )
+        log "  Found $ANN_FILE, converting..."
+        python data/prepare_dataset.py --data_dir "$SRC" --ann_file "$ANN_FILE" --output_dir "$OUTPUT_DIR"
 
     elif [ -d "$SRC/images" ] && [ -d "$SRC/labels" ]; then
         log "  YOLO directory structure detected, linking..."
