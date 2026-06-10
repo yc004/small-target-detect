@@ -7,6 +7,8 @@ to keep only target classes, and remaps class IDs to 0-based contiguous.
 
 Usage:
     python data/extract_dataset.py
+    python data/extract_dataset.py --zip_path /path/to/TT100K-YOLO格式.zip
+    python data/extract_dataset.py --zip_path /path/to/data.zip --output_dir /path/to/output
 
 The script reads from Datasets-TT100K/TT100K-YOLO格式.zip and outputs to data/processed/.
 
@@ -22,6 +24,7 @@ Note: 'io' is not in the 45-class TT100K subset. Using 'pne' as the
 semantically closest replacement (both mean "no entry").
 """
 
+import argparse
 import logging
 import shutil
 import sys
@@ -290,10 +293,27 @@ def validate_output(output_dir: Path) -> bool:
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
-    if not ZIP_PATH.exists():
-        logger.error(f"ZIP file not found: {ZIP_PATH}")
+    parser = argparse.ArgumentParser(
+        description="Extract and filter TT100K YOLO-format dataset from ZIP"
+    )
+    parser.add_argument(
+        "--zip_path", type=Path, default=ZIP_PATH,
+        help=f"Path to YOLO-format ZIP (default: {ZIP_PATH})",
+    )
+    parser.add_argument(
+        "--output_dir", type=Path, default=OUTPUT_DIR,
+        help=f"Output directory for filtered dataset (default: {OUTPUT_DIR})",
+    )
+    args = parser.parse_args()
+
+    zip_path = args.zip_path
+    output_dir = args.output_dir
+
+    if not zip_path.exists():
+        logger.error(f"ZIP file not found: {zip_path}")
         logger.error(
-            "Please ensure Datasets-TT100K/TT100K-YOLO格式.zip exists."
+            "Specify the path with --zip_path, e.g.:\n"
+            "  python data/extract_dataset.py --zip_path /public/data/image/TT100K/TT100K-YOLO格式.zip"
         )
         sys.exit(1)
 
@@ -308,17 +328,17 @@ def main():
     logger.info("=" * 60)
 
     # Clean output directory
-    if OUTPUT_DIR.exists():
-        logger.info(f"Removing existing output: {OUTPUT_DIR}")
-        shutil.rmtree(OUTPUT_DIR)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if output_dir.exists():
+        logger.info(f"Removing existing output: {output_dir}")
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     all_stats = {}
 
-    with zipfile.ZipFile(ZIP_PATH, "r") as zf:
+    with zipfile.ZipFile(zip_path, "r") as zf:
         for split in SPLITS:
-            img_dir = OUTPUT_DIR / "images" / split
-            lbl_dir = OUTPUT_DIR / "labels" / split
+            img_dir = output_dir / "images" / split
+            lbl_dir = output_dir / "labels" / split
 
             stats = process_split(zf, split, target_map, img_dir, lbl_dir)
             all_stats[split] = stats
@@ -353,17 +373,17 @@ def main():
     logger.info("=" * 60)
 
     # ─── Generate YAML ───────────────────────────────────────────────────
-    generate_dataset_yaml(OUTPUT_DIR)
+    generate_dataset_yaml(output_dir)
 
     # ─── Validate ─────────────────────────────────────────────────────────
     logger.info("\nValidating output...")
-    if validate_output(OUTPUT_DIR):
+    if validate_output(output_dir):
         logger.info("✓ Validation passed!")
     else:
         logger.warning("⚠ Validation found issues — review above warnings")
 
-    logger.info(f"\nDataset ready at: {OUTPUT_DIR}")
-    logger.info(f"Config file: {OUTPUT_DIR / 'dataset.yaml'}")
+    logger.info(f"\nDataset ready at: {output_dir}")
+    logger.info(f"Config file: {output_dir / 'dataset.yaml'}")
 
 
 if __name__ == "__main__":
