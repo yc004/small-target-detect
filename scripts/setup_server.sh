@@ -39,6 +39,12 @@ else
     # Use extracted dir if available, otherwise use original path
     if [ -d "$UNZIP_DIR" ] && [ -f "$UNZIP_DIR/.extracted" ]; then
         SRC="$UNZIP_DIR"
+        # If extraction created a single subdirectory, use that as root
+        SUBDIRS=$(find "$SRC" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+        if [ "$SUBDIRS" -eq 1 ]; then
+            SRC=$(find "$SRC" -mindepth 1 -maxdepth 1 -type d | head -1)
+            log "  Dataset root: $SRC"
+        fi
     else
         SRC="$DATASET_PATH"
     fi
