@@ -24,18 +24,14 @@ log "═══ Step 1/3: Preparing dataset ═══"
 if [ -f "$OUTPUT_DIR/dataset.yaml" ]; then
     log "  Already prepared, skipping."
 else
-    # --- 1a: If data is still in raw ZIPs, extract first ---
-    RAW_ZIPS=$(find "$DATASET_PATH" -maxdepth 3 -name "*.zip" 2>/dev/null | head -5 || true)
+    # --- 1a: Extract tt100k_2021.zip ---
+    RAW_ZIP=$(find "$DATASET_PATH" -maxdepth 3 -name "tt100k_2021.zip" 2>/dev/null | head -1 || true)
 
-    if [ -n "$RAW_ZIPS" ] && [ ! -f "$UNZIP_DIR/.extracted" ]; then
-        log "  Found raw ZIP(s), extracting..."
+    if [ -n "$RAW_ZIP" ] && [ -f "$RAW_ZIP" ] && [ ! -f "$UNZIP_DIR/.extracted" ]; then
+        log "  Extracting tt100k_2021.zip..."
         rm -rf "$UNZIP_DIR"
         mkdir -p "$UNZIP_DIR"
-
-        echo "$RAW_ZIPS" | while IFS= read -r zip; do
-            log "    unzip: $zip"
-            unzip -qo "$zip" -d "$UNZIP_DIR/"
-        done
+        unzip -qo "$RAW_ZIP" -d "$UNZIP_DIR/"
         touch "$UNZIP_DIR/.extracted"
         log "  ✓ Extracted to $UNZIP_DIR"
     fi
