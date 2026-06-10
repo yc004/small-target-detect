@@ -44,13 +44,14 @@ logger = logging.getLogger(__name__)
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 # The 5 target classes from TT100K
-TARGET_CLASSES = ["i2", "i4", "i5", "io", "p10"]
+# Note: 'io' does not exist in TT100K; 'pne' (禁止驶入/no entry) is used instead
+TARGET_CLASSES = ["i2", "i4", "i5", "pne", "p10"]
 
 CLASS_NAMES = {
     "i2": "speed_limit_5",
     "i4": "speed_limit_30",
     "i5": "speed_limit_40",
-    "io": "no_entry",
+    "pne": "no_entry",
     "p10": "no_pedestrians",
 }
 
