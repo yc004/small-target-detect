@@ -9,12 +9,13 @@ set -euo pipefail
 DATASET_PATH="${TT100K_PATH:-/public/data/image/TT100K}"
 OUTPUT_DIR="data/processed"
 EXPERIMENT_DIR="experiments/stage1_baseline"
+UNZIP_DIR="data/TT100K_raw"
 BATCH_SIZE="${BATCH_SIZE:-8}"
 IMG_SIZE="${IMG_SIZE:-1280}"
 EPOCHS="${EPOCHS:-100}"
 DEVICE="${DEVICE:-0}"
 
-log()  { echo -e "[$(date +%H:%M:%S)] $*"; }
+log() { echo -e "[$(date +%H:%M:%S)] $*"; }
 
 # ─── Step 1: Prepare dataset ─────────────────────────────────────────────────
 
@@ -23,19 +24,45 @@ log "═══ Step 1/3: Preparing dataset ═══"
 if [ -f "$OUTPUT_DIR/dataset.yaml" ]; then
     log "  Already prepared, skipping."
 else
-    YOLO_ZIP=$(find "$DATASET_PATH" -maxdepth 2 \( -name "*YOLO*.zip" -o -name "*yolo*.zip" \) 2>/dev/null | head -1 || true)
+    # --- 1a: If data is still in raw ZIPs, extract first ---
+    RAW_ZIPS=$(find "$DATASET_PATH" -maxdepth 3 -name "*.zip" 2>/dev/null | head -5 || true)
+
+    if [ -n "$RAW_ZIPS" ] && [ ! -f "$UNZIP_DIR/.extracted" ]; then
+        log "  Found raw ZIP(s), extracting..."
+        rm -rf "$UNZIP_DIR"
+        mkdir -p "$UNZIP_DIR"
+
+        echo "$RAW_ZIPS" | while IFS= read -r zip; do
+            log "    unzip: $zip"
+            unzip -qo "$zip" -d "$UNZIP_DIR/"
+        done
+        touch "$UNZIP_DIR/.extracted"
+        log "  ✓ Extracted to $UNZIP_DIR"
+    fi
+
+    # Use extracted dir if available, otherwise use original path
+    if [ -d "$UNZIP_DIR" ] && [ -f "$UNZIP_DIR/.extracted" ]; then
+        SRC="$UNZIP_DIR"
+    else
+        SRC="$DATASET_PATH"
+    fi
+
+    # --- 1b: Detect format and convert to YOLO ---
+    YOLO_ZIP=$(find "$SRC" -maxdepth 2 \( -name "*YOLO*.zip" -o -name "*yolo*.zip" \) 2>/dev/null | head -1 || true)
 
     if [ -n "$YOLO_ZIP" ] && [ -f "$YOLO_ZIP" ]; then
-        log "  Found YOLO ZIP, extracting & filtering..."
+        log "  YOLO-format ZIP detected, filtering 5 target classes..."
         python data/extract_dataset.py --zip_path "$YOLO_ZIP" --output_dir "$OUTPUT_DIR"
-    elif [ -f "$DATASET_PATH/annotations.json" ]; then
+
+    elif [ -f "$SRC/annotations.json" ]; then
         log "  Found annotations.json, converting..."
-        python data/prepare_dataset.py --data_dir "$DATASET_PATH" --output_dir "$OUTPUT_DIR"
-    elif [ -d "$DATASET_PATH/images" ] && [ -d "$DATASET_PATH/labels" ]; then
-        log "  YOLO-format directory detected, linking..."
+        python data/prepare_dataset.py --data_dir "$SRC" --output_dir "$OUTPUT_DIR"
+
+    elif [ -d "$SRC/images" ] && [ -d "$SRC/labels" ]; then
+        log "  YOLO directory structure detected, linking..."
         mkdir -p "$OUTPUT_DIR/images" "$OUTPUT_DIR/labels"
-        cp -rn "$DATASET_PATH/images/"* "$OUTPUT_DIR/images/" 2>/dev/null || true
-        cp -rn "$DATASET_PATH/labels/"* "$OUTPUT_DIR/labels/" 2>/dev/null || true
+        cp -rn "$SRC/images/"* "$OUTPUT_DIR/images/" 2>/dev/null || true
+        cp -rn "$SRC/labels/"* "$OUTPUT_DIR/labels/" 2>/dev/null || true
         python -c "
 import yaml
 from pathlib import Path
@@ -49,7 +76,11 @@ with open(out / 'dataset.yaml', 'w') as f:
 print('  dataset.yaml written')
 "
     else
-        echo "ERROR: Cannot detect dataset format at $DATASET_PATH"
+        log "  Content of $SRC:"
+        ls -l "$SRC" 2>/dev/null || true
+        echo ""
+        echo "ERROR: Cannot detect dataset format."
+        echo "Expected: annotations.json, YOLO .zip, or images/ + labels/ directories"
         exit 1
     fi
     log "  ✓ Done"
