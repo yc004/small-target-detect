@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Dataset files (too large for git)
+Datasets-TT100K/
+data/processed/
+data/TT100K/
+
+# Training outputs
+experiments/
+runs/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
