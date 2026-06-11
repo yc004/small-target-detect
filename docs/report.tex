@@ -3,7 +3,7 @@
 % 作品：基于改进 YOLOv8 的小目标交通标志实时检测
 % ═══════════════════════════════════════════════════════════════════════════════
 
-\documentclass[12pt,a4paper,fontset=mac]{ctexart}
+\documentclass[12pt,a4paper,fontset=none]{ctexart}
 
 % ─── Packages ─────────────────────────────────────────────────────────────────
 \usepackage[top=2.5cm, bottom=2.5cm, left=3cm, right=2.5cm]{geometry}
@@ -21,12 +21,20 @@
 \usepackage{multirow}
 \usepackage{xcolor}
 \usepackage{float}
+\usepackage{fontspec}
 
-% ─── Caption settings ─────────────────────────────────────────────────────────
-\captionsetup[figure]{font=small, labelfont=bf, labelsep=quad}
-\captionsetup[table]{font=small, labelfont=bf, labelsep=quad}
-
-% ─── Chinese fonts managed by ctex fontset=mac ─────────────────────────────
+% ─── Chinese fonts ────────────────────────────────────────────────────────────
+\setCJKmainfont{Songti SC}[BoldFont=Heiti SC, ItalicFont=Kaiti SC]
+\setCJKsansfont{Heiti SC}
+\setCJKmonofont{STFangsong}
+\setCJKfamilyfont{zhsong}{Songti SC}
+\setCJKfamilyfont{zhhei}{Heiti SC}
+\setCJKfamilyfont{zhkai}{Kaiti SC}
+\setCJKfamilyfont{zhfs}{STFangsong}
+\newcommand{\songti}{\CJKfamily{zhsong}}
+\newcommand{\heiti}{\CJKfamily{zhhei}}
+\newcommand{\kaishu}{\CJKfamily{zhkai}}
+\newcommand{\fangsong}{\CJKfamily{zhfs}}
 
 % ─── Header / Footer ──────────────────────────────────────────────────────────
 \pagestyle{fancy}
