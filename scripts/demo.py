@@ -17,7 +17,7 @@ from ultralytics import YOLO
 def main():
     parser = argparse.ArgumentParser(description="Webcam demo for traffic sign detection")
     parser.add_argument("--model", required=True, help="Path to trained model (.pt)")
-    parser.add_argument("--conf", type=float, default=0.4, help="Confidence threshold")
+    parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
     parser.add_argument("--imgsz", type=int, default=640, help="Inference resolution")
     parser.add_argument("--cam", type=int, default=0, help="Camera device index")
     args = parser.parse_args()

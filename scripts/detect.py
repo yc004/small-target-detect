@@ -224,8 +224,8 @@ def main():
     parser.add_argument(
         "--imgsz",
         type=int,
-        default=1280,
-        help="Inference image size",
+        default=640,
+        help="Inference image size (must match training)",
     )
     parser.add_argument(
         "--conf",
