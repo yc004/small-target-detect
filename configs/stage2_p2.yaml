@@ -7,7 +7,7 @@ pretrained: true
 
 # Data
 data: "data/processed/dataset.yaml"
-imgsz: 1280
+imgsz: 640
 rect: false
 
 # Training (P2 adds ~65% more FLOPs, reduce batch to fit VRAM)
