@@ -25,12 +25,9 @@ detect = "scripts.detect:main"
 eval = "scripts.eval:main"
 demo = "scripts.demo:main"
 
-[tool.uv.sources]
-torch = { index = "pytorch-cu126" }
-torchvision = { index = "pytorch-cu126" }
-torchaudio = { index = "pytorch-cu126" }
-
-[[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
+# ─── Platform-specific PyTorch ─────────────────────────────────────────────
+# Default: PyPI provides platform-appropriate torch (CUDA on Linux, MPS on Mac).
+# For CUDA 12.6 on Linux, install manually first:
+#   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+#   uv sync
+# ───────────────────────────────────────────────────────────────────────────
