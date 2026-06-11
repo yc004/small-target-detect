@@ -1,13 +1,12 @@
 % ═══════════════════════════════════════════════════════════════════════════════
 % 中国大学生计算机设计大赛 — 人工智能实践赛作品报告
-% 作品：基于改进 YOLOv8 的小目标交通标志实时检测
-% 基于 docs/作品报告模板.docx 复刻
+% 完全复刻 docs/作品报告模板.docx 格式
 % 编译: xelatex report.tex
 % ═══════════════════════════════════════════════════════════════════════════════
 
-\documentclass[12pt,a4paper,fontset=none]{ctexart}
+\documentclass[12pt,a4paper,linespread=1.5,fontset=none]{ctexart}
 
-% ─── ctex numbering: 第一章、1.1、1.1.1 ──────────────────────────────────
+% ─── ctex 编号: 第一章、1.1、1.1.1（匹配 docx absNumId=0） ────────────────
 \ctexset{
     section = {
         name = {第,章},
@@ -39,15 +38,15 @@
 \usepackage{titlesec}
 \usepackage{indentfirst}
 
-% ─── Fonts (macOS system fonts, matching docx 华文中宋/华文楷体/宋体/黑体) ───
-\setCJKmainfont{Songti SC}[BoldFont=Heiti SC, AutoFakeSlant=0.2]
+% ─── Fonts（匹配 docx: 宋体正文 / 黑体标题 / 华文中宋封面 / 华文楷体副标题）───
+\setCJKmainfont{Songti SC}[BoldFont=Heiti SC]
 \setCJKsansfont{Heiti SC}
 \setCJKmonofont{STFangsong}
-\setCJKfamilyfont{zhsong}{Songti SC}
-\setCJKfamilyfont{zhhei}{Heiti SC}
-\setCJKfamilyfont{zhkai}{Kaiti SC}
-\setCJKfamilyfont{zhfs}{STFangsong}
-\setCJKfamilyfont{zhzongsong}{Songti SC}  % macOS 无华文中宋，用宋体替代
+\setCJKfamilyfont{zhsong}{Songti SC}        % 宋体 → 正文
+\setCJKfamilyfont{zhhei}{Heiti SC}           % 黑体 → 标题
+\setCJKfamilyfont{zhkai}{Kaiti SC}           % 楷体 → 封面副标题
+\setCJKfamilyfont{zhfs}{STFangsong}          % 仿宋
+\setCJKfamilyfont{zhzongsong}{Songti SC}     % macOS 无华文中宋，宋体 Bold 替代
 
 \newcommand{\songti}{\CJKfamily{zhsong}}
 \newcommand{\heiti}{\CJKfamily{zhhei}}
@@ -55,33 +54,32 @@
 \newcommand{\fangsong}{\CJKfamily{zhfs}}
 \newcommand{\zongsong}{\CJKfamily{zhzongsong}}
 
-% ─── Heading spacing (match docx EMU values) ──────────────────────────────────
-% Heading 1: space_before=594360 EMU ≈ 46.8pt, space_after=99060 EMU ≈ 7.8pt
-\titleformat{\section}{\centering\heiti\bfseries\Large}{}{0em}{}
-\titlespacing{\section}{0pt}{47pt}{8pt}
+% ─── Heading spacing（精确匹配 docx EMU 值）───────────────────────────────────
+% H1: sb=46.8pt sa=7.8pt, 黑体 18pt Bold 居中
+\titleformat{\section}{\centering\heiti\bfseries\fontsize{18pt}{27pt}\selectfont}{}{0em}{}
+\titlespacing{\section}{0pt}{46.8pt}{7.8pt}
 
-% Heading 2: space_before=297180 EMU ≈ 23.4pt, space_after=59055 EMU ≈ 4.7pt
-\titleformat{\subsection}{\heiti\bfseries\large}{}{0em}{}
-\titlespacing{\subsection}{0pt}{23pt}{5pt}
+% H2: sb=23.4pt sa=4.7pt, 黑体 14pt Bold
+\titleformat{\subsection}{\heiti\bfseries\fontsize{14pt}{21pt}\selectfont}{}{0em}{}
+\titlespacing{\subsection}{0pt}{23.4pt}{4.7pt}
 
-% Heading 3: space_before=198120 EMU ≈ 15.6pt, space_after=39370 EMU ≈ 3.1pt
-\titleformat{\subsubsection}{\heiti\bfseries\normalsize}{}{0em}{}
-\titlespacing{\subsubsection}{0pt}{16pt}{3pt}
+% H3: sb=15.6pt sa=3.1pt, 黑体 12pt Bold
+\titleformat{\subsubsection}{\heiti\bfseries\fontsize{12pt}{18pt}\selectfont}{}{0em}{}
+\titlespacing{\subsubsection}{0pt}{15.6pt}{3.1pt}
 
 % ─── Body text ────────────────────────────────────────────────────────────────
-% 正文段落: first_line_indent=304800 EMU ≈ 24pt (2 chars), space_before=after=39370 EMU ≈ 3pt
-\setlength{\parindent}{2em}       % first-line indent 2 chars
-\setlength{\parskip}{3pt plus1pt minus1pt}
+% 正文段落: 宋体 12pt, 首行缩进 2 字符(≈24pt), 段前后 3.1pt
+\setlength{\parindent}{2em}
+\setlength{\parskip}{3.1pt plus1pt minus1pt}
 
-% ─── Caption style ─────────────────────────────────────────────────────────────
-% Caption: space_before=59055, space_after=59055 EMU
-\captionsetup[figure]{font={small,bf}, belowskip=5pt, aboveskip=5pt}
-\captionsetup[table]{font={small,bf}, belowskip=5pt, aboveskip=5pt}
+% ─── Caption（图/表题注: sb=sa=4.7pt, 黑体 10pt）─────────────────────────────
+\captionsetup[figure]{font={small,bf}, belowskip=4.7pt, aboveskip=4.7pt}
+\captionsetup[table]{font={small,bf}, belowskip=4.7pt, aboveskip=4.7pt}
 
 % ─── List spacing ─────────────────────────────────────────────────────────────
 \setlist{nosep, leftmargin=2em, itemindent=0em}
 
-% ─── Header / Footer ──────────────────────────────────────────────────────────
+% ─── Header ───────────────────────────────────────────────────────────────────
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[C]{\small\kaishu 基于改进 YOLOv8 的小目标交通标志实时检测}
@@ -91,7 +89,7 @@
 \begin{document}
 
 % ═══════════════════════════════════════════════════════════════════════════════
-% 封面（完全复刻 docx 样式）
+% 封面（完全复刻 docx）
 % ═══════════════════════════════════════════════════════════════════════════════
 \begin{titlepage}
 \thispagestyle{empty}
@@ -99,39 +97,37 @@
 
 \vspace*{3cm}
 
-% 华文中宋 28pt Bold（macOS 用宋体 Bold 替代）
+% 华文中宋 28pt Bold 居中
 {\zongsong\bfseries\fontsize{28pt}{42pt}\selectfont 2025年（第18届）\par}
 
 \vspace{0.5cm}
 
+% 华文中宋 28pt Bold 两端对齐（DISTRIBUTE）
 {\zongsong\bfseries\fontsize{28pt}{42pt}\selectfont 中国大学生计算机设计大赛\par}
 
 \vspace{1.5cm}
 
-% 华文楷体 20pt
+% 华文楷体 20pt 居中，段前后 31.2pt
+\vspace{31.2pt}
 {\kaishu\fontsize{20pt}{30pt}\selectfont 人工智能实践赛作品报告\par}
+\vspace{31.2pt}
 
-\vspace{3cm}
+\vspace{2cm}
 
-% 宋体 16pt 左对齐
+% 宋体 16pt 左对齐，段前后 7.8pt
 \begin{flushleft}
-{\songti\fontsize{16pt}{28pt}\selectfont
-作品编号：\underline{\hspace{6cm}}\\[12pt]
-作品名称：\underline{\hspace{6cm}}\\[12pt]
-填写日期：\underline{\hspace{6cm}}
+{\songti\fontsize{16pt}{24pt}\selectfont
+\vspace{7.8pt}
+作品编号：\underline{\hspace{6cm}}\\[7.8pt]
+\vspace{7.8pt}
+作品名称：\underline{\hspace{6cm}}\\[7.8pt]
+\vspace{7.8pt}
+填写日期：\underline{\hspace{6cm}}\\[7.8pt]
 }
 \end{flushleft}
 
 \end{center}
 \end{titlepage}
-
-% ─── Table of Contents ────────────────────────────────────────────────────────
-\setcounter{page}{1}
-\pagenumbering{Roman}
-\tableofcontents
-\newpage
-\setcounter{page}{1}
-\pagenumbering{arabic}
 
 % ═══════════════════════════════════════════════════════════════════════════════
 % 第1章  作品概述
@@ -164,7 +160,7 @@
 \begin{enumerate}[label=(\arabic*)]
     \item \textbf{多尺度特征融合}：FPN \cite{lin2017fpn} 及 PANet、BiFPN 等通过自顶向下和自底向上的路径增强多尺度特征表达，但默认融合范围通常只覆盖 P3--P7，对更细粒度的 P2 特征利用不足。
     \item \textbf{注意力机制}：SE-Net、CBAM、ECA-Net \cite{wang2020eca} 等通过通道或空间注意力增强关键特征，其中 ECA 以极小的参数开销（1D 卷积替代全连接）实现了与 SE 相当的提升效果。
-    \item \textbf{数据增强}：Mosaic、MixUp、Copy-Paste \cite{ghiasi2021simple} 等策略通过合成新样本增加训练数据多样性。Copy-Paste 特别适合小目标场景。
+    \item \textbf{数据增强}：Mosaic、MixUp、Copy-Paste \cite{ghiasi2021simple} 等策略通过合成新样本增加训练数据多样性，Copy-Paste 特别适合小目标场景。
     \item \textbf{后处理优化}：Soft-NMS \cite{bodla2017soft} 以置信度衰减替代硬删除，在密集目标场景中能保留更多的真阳性预测。
 \end{enumerate}
 
@@ -184,7 +180,7 @@
 
 \subsection{总体技术路线}
 
-本作品以 YOLOv8s 为基线检测框架，采用四阶段递进式改进策略（图~\ref{fig:pipeline}），构建面向小目标交通标志的实时检测系统。四个改进阶段分别为：Stage 2 增加 P2 高分辨率检测层，Stage 3 引入 ECA 通道注意力，Stage 4 采用 Copy-Paste 数据增强，Stage 5 集成 Soft-NMS 后处理。
+本作品以 YOLOv8s 为基线检测框架，采用四阶段递进式改进策略（图~\ref{fig:pipeline}），构建面向小目标交通标志的实时检测系统。四个改进阶段依次为：Stage 2 增加 P2 高分辨率检测层、Stage 3 引入 ECA 通道注意力、Stage 4 采用 Copy-Paste 数据增强、Stage 5 集成 Soft-NMS 后处理。
 
 \begin{figure}[H]
 \centering
@@ -200,9 +196,9 @@
 
 \subsection{增加 P2 高分辨率检测层}
 
-YOLOv8s 默认检测头包含 P3（下采样 8 倍，$80\times 80$）、P4（$40\times 40$）、P5（$20\times 20$）三层。本作品在 Neck 的 FPN 路径中增加一层上采样，将 P3 特征进一步放大至 P2 级别（下采样 4 倍，$160\times 160$），连接 Backbone 第 2 层（stride=4）特征经 C2f 融合后，构成 P2 检测头。P2 的每个空间位置对应 $4\times 4$ 像素区域，$16\times 16$ 的小目标在该层占据 $4\times 4$ 个特征点（P3 仅 $2\times 2$），特征表达能力翻倍。
+YOLOv8s 默认检测头包含 P3（下采样 8 倍，$80\times 80$）、P4（$40\times 40$）、P5（$20\times 20$）三层。本作品在 Neck 的 FPN 路径中增加一层上采样，将 P3 特征进一步放大至 P2 级别（下采样 4 倍，$160\times 160$），连接 Backbone 第 2 层（stride=4）经 C2f 融合后，构成 P2 检测头。P2 的每个空间位置对应 $4\times 4$ 像素区域，$16\times 16$ 的小目标在该层占据 $4\times 4$ 个特征点（P3 仅 $2\times 2$），特征表达能力翻倍。
 
-改进后的检测头结构如图~\ref{fig:p2} 所示。P2 模型参数量由 11.1M 增至 14.5M，FLOPs 由 28.7G 增至 47.5G。
+改进后 P2 模型参数量由 11.1M 增至 14.5M（+30\%），FLOPs 由 28.7G 增至 47.5G（+65\%）。
 
 \begin{figure}[H]
 \centering
@@ -212,7 +208,7 @@ YOLOv8s 默认检测头包含 P3（下采样 8 倍，$80\times 80$）、P4（$40
 \songti （此处插入 P2 检测头结构示意图）
 \vspace{2.5cm}
 \end{minipage}}
-\caption{P2 检测层结构示意（虚线框为新增模块）}
+\caption{P2 检测层结构示意（虚线框内为新增模块）}
 \label{fig:p2}
 \end{figure}
 
@@ -228,7 +224,7 @@ y = \sigma\left(\text{Conv1D}_{k}\left(\text{GAP}(x)\right)\right) \cdot x
 
 \subsection{Copy-Paste 数据增强}
 
-训练时以 0.5 概率执行：从同 batch 另一张图中随机选取小目标框（面积 $< 32^2$ px），复制像素并随机缩放 0.8--1.2 倍，粘贴到当前图的空旷区域（与现有框 IoU $< 0.1$），同步更新标注。该策略可有效增加尾部类别的正样本密度。
+训练时以 0.5 概率执行：从同 batch 另一张图中随机选取小目标框（面积 $< 32^2$ px），复制像素并随机缩放 0.8--1.2 倍，粘贴到当前图的空旷区域（与现有框 IoU $< 0.1$），同步更新标注。该策略可有效增加尾部类别（如 p10 禁止行人通行）的正样本密度。
 
 \subsection{Soft-NMS 后处理}
 
@@ -247,7 +243,7 @@ s_i = s_i \cdot \exp\left(-\frac{\text{IoU}(M, b_i)^2}{\sigma}\right), \quad \fo
 
 \subsection{数据集}
 
-本作品采用 TT100K 2021 版数据集，原始数据包含约 100,000 张腾讯街景全景图，标注了约 30,000 个交通标志实例，涵盖 221 类中国交通标志。筛选其中 5 类典型小目标标志进行实验：
+本作品采用 TT100K 2021 版数据集，原始数据包含约 100,000 张腾讯街景全景图，标注约 30,000 个交通标志实例，涵盖 221 类中国交通标志。筛选其中 5 类典型小目标标志进行实验，数据集类别分布如表~\ref{tab:dataset} 所示。
 
 \begin{table}[H]
 \centering
@@ -266,7 +262,7 @@ no\_pedestrians  & p10  & 禁止行人通行     & 193  \\
 \label{tab:dataset}
 \end{table}
 
-数据集按 7:2:1 划分为训练集（2171 张）、验证集（622 张）和测试集（314 张）。训练时下采样至 $640\times 640$，标注格式由原始 TT100K JSON（含嵌套 objects 结构）转换为 YOLO 归一化格式。
+数据集按 7:2:1 划分为训练集（2171 张）、验证集（622 张）和测试集（314 张）。训练时下采样至 $640\times 640$，标注格式由原始 TT100K JSON 转换为 YOLO 归一化格式。
 
 \subsection{实验环境}
 
@@ -291,6 +287,8 @@ Python    & 3.12 \\
 所有实验统一设置：输入分辨率 $640\times 640$，SGD 优化器（momentum=0.937，weight\_decay=0.0005），初始学习率 0.01，余弦退火调度，前 3 轮 warm-up，batch size 16（P2 模型降为 12），训练 100 轮，最后 10 轮关闭 Mosaic 增强。每阶段严格保持控制变量，仅变更目标改进点。
 
 \subsection{消融实验设计}
+
+为量化各改进点的独立贡献，设计消融实验矩阵如表~\ref{tab:ablation} 所示。
 
 \begin{table}[H]
 \centering
@@ -329,7 +327,7 @@ E (完整)    & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ \\
 
 \begin{table}[H]
 \centering
-\caption{基线模型（Stage 1）测试指标}
+\caption{基线模型测试指标}
 \begin{tabular}{lc}
 \toprule
 \textbf{指标} & \textbf{数值} \\
@@ -347,7 +345,7 @@ Recall       & 0.807 \\
 
 增加 P2 检测层后，模型参数量由 11.1M 增至 14.5M（+30\%），FLOPs 由 28.7G 增至 47.5G（+65\%）。
 
-（训练完成后填入具体指标和对比分析）
+（训练完成后填入具体指标与对比分析）
 
 \subsection{消融实验汇总}
 
@@ -364,24 +362,24 @@ Recall       & 0.807 \\
     \item \textbf{渐进式改进策略}：P2 检测层 $\to$ ECA 注意力 $\to$ Copy-Paste 增强 $\to$ Soft-NMS，四阶段递进，各阶段贡献可量化；
     \item \textbf{小目标专项优化}：P2 检测层将最高分辨率由 $80\times 80$ 提升至 $160\times 160$，小目标特征分辨率翻倍；
     \item \textbf{轻量化注意力}：ECA 仅增 0.01M 参数，兼顾精度与速度；
-    \item \textbf{工程化设计}：YAML 配置驱动 + CLI 覆写，支持 Linux/Windows/Mac 一键训练。
+    \item \textbf{工程化设计}：YAML 配置驱动 + CLI 覆写，支持 Linux/Windows/Mac 一键训练，代码结构清晰可复现。
 \end{enumerate}
 
 \subsection{应用推广}
 
 \begin{itemize}
-    \item \textbf{车载辅助驾驶}：嵌入车载平台，实时提供交通标志提示；
-    \item \textbf{交通监控}：部署于路边摄像头，自动检测并统计标志状态；
-    \item \textbf{高精地图更新}：结合 SLAM，批量采集道路标志信息。
+    \item \textbf{车载辅助驾驶}：嵌入车载计算平台，为驾驶员提供实时交通标志提示；
+    \item \textbf{交通监控}：部署于路边摄像头，自动检测并统计交通标志状态；
+    \item \textbf{高精地图更新}：结合 SLAM 定位，批量采集道路标志信息用于地图更新。
 \end{itemize}
 
 \subsection{作品展望}
 
 \begin{enumerate}[label=(\arabic*)]
-    \item \textbf{模型轻量化}：探索知识蒸馏或模型剪枝，降低 P2 模型计算开销，达到边缘部署要求；
-    \item \textbf{多天气鲁棒性}：引入雾天、夜间数据增强或域自适应方法；
+    \item \textbf{模型轻量化}：探索知识蒸馏或模型剪枝，降低 P2 模型计算开销（当前 FLOPs 增加 65\%），达到边缘部署要求；
+    \item \textbf{多天气鲁棒性}：引入雾天、夜间数据增强或域自适应方法，提升恶劣天气下的检测鲁棒性；
     \item \textbf{多帧融合}：利用视频时序信息进行目标跟踪，减少单帧漏检；
-    \item \textbf{端到端部署}：导出 ONNX / TensorRT，实现边缘设备实时推理。
+    \item \textbf{端到端部署}：导出 ONNX / TensorRT 模型，实现边缘设备上的实时推理。
 \end{enumerate}
 
 % ═══════════════════════════════════════════════════════════════════════════════
