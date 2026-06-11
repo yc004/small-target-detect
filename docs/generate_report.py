@@ -160,7 +160,7 @@ def generate():
     doc = Document(str(TEMPLATE))
     paras = doc.paragraphs
 
-    # ── Pass 1: mark paragraphs to clear ──
+    # ── Pass 1: mark paragraphs to clear (instructions only, NOT body text) ──
     to_clear = set()
     for i, para in enumerate(paras):
         text = para.text.strip()
@@ -174,11 +174,7 @@ def generate():
             to_clear.add(i)
         elif "以上所有示例" in text:
             to_clear.add(i)
-        elif "正文示例" in text and style == "正文段落":
-            to_clear.add(i)
         elif "所有图片必须有" in text or "所有表格必须有" in text:
-            to_clear.add(i)
-        elif text == "图 1  图文说明文字" or text == "表 1  表格说明":
             to_clear.add(i)
 
     # ── Pass 2: find each heading and fill the first 正文段落 after it ──
@@ -191,30 +187,17 @@ def generate():
     body_fills = {}  # para index → content text
     for heading_text, h_idx in heading_to_idx.items():
         content = SECTIONS[heading_text].strip()
-        # Find the first non-empty 正文段落 after this heading
         for j in range(h_idx + 1, len(paras)):
             if j in to_clear:
                 continue
             p = paras[j]
+            # Stop if we hit another heading — no body paragraph exists for this section
+            if p.style.name in ("Heading 1", "Heading 2", "Heading 3"):
+                break
             if p.style.name == "正文段落":
                 body_fills[j] = content
+                to_clear.add(j)
                 break
-
-    # ── Special: fill H1-level sections that use 说明→正文段落 pattern ──
-    # For sections like 技术方案, 系统实现, 测试分析, 作品总结 — these are H1
-    # where the first body text is in the 正文段落 after the 说明
-    for heading_text, h_idx in heading_to_idx.items():
-        if heading_text in ["技术方案", "系统实现", "测试分析", "作品总结"]:
-            content = SECTIONS[heading_text].strip()
-            # Find the first 正文段落 with content after this heading
-            found = 0
-            for j in range(h_idx + 1, len(paras)):
-                p = paras[j]
-                if p.style.name == "正文段落" and j not in to_clear:
-                    if found == 0:
-                        body_fills[j] = content
-                        found += 1
-                    break
 
     # ── Pass 3: Clear marked paragraphs ──
     for i in to_clear:
