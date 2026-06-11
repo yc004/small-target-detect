@@ -10,9 +10,9 @@ data: "data/processed/dataset.yaml"
 imgsz: 1280
 rect: false
 
-# Training (reduced batch for P2 — more feature maps = more VRAM)
+# Training (P2 adds ~65% more FLOPs, reduce batch to fit VRAM)
 epochs: 100
-batch: 6                         # Down from 8 (P2 adds ~30% more VRAM)
+batch: 12                        # Down from 16 (baseline) for P2 overhead
 workers: 8
 device: mps
 amp: false
