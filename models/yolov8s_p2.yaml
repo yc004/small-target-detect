@@ -1,0 +1,54 @@
+# YOLOv8s with P2 detection layer for small target detection
+# P2 adds a 160×160 detection head (stride=4), doubling feature resolution
+# for targets < 32×32 px compared to the default P3 (80×80, stride=8).
+
+# Parameters
+nc: 5  # number of classes
+scales:
+  s: [0.50, 0.50, 1024]  # model scale (same as yolov8s)
+
+# ─── Backbone (same as yolov8s) ──────────────────────────────────────────────
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]]        # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]       # 1-P2/4  ← used by P2 head via layer 2
+  - [-1, 3, C2f, [128, True]]         # 2 ← P2 feature source
+  - [-1, 1, Conv, [256, 3, 2]]       # 3-P3/8
+  - [-1, 6, C2f, [256, True]]         # 4 ← P3 feature source
+  - [-1, 1, Conv, [512, 3, 2]]       # 5-P4/16
+  - [-1, 6, C2f, [512, True]]         # 6 ← P4 feature source
+  - [-1, 1, Conv, [1024, 3, 2]]      # 7-P5/32
+  - [-1, 3, C2f, [1024, True]]        # 8
+  - [-1, 1, SPPF, [1024, 5]]          # 9 ← P5 feature source
+
+# ─── Head (extended with P2) ─────────────────────────────────────────────────
+head:
+  # Top-down FPN
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]         # 10
+  - [[-1, 6], 1, Concat, [1]]                           # 11 cat P4
+  - [-1, 3, C2f, [512]]                                  # 12
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]         # 13
+  - [[-1, 4], 1, Concat, [1]]                           # 14 cat P3
+  - [-1, 3, C2f, [256]]                                  # 15
+
+  # NEW: upsample P3 → P2
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]         # 16
+  - [[-1, 2], 1, Concat, [1]]                           # 17 cat backbone P2 (layer 2)
+  - [-1, 3, C2f, [128]]                                  # 18 ← P2 detection head
+
+  # Bottom-up PAN
+  - [-1, 1, Conv, [128, 3, 2]]                          # 19 P2→P3
+  - [[-1, 15], 1, Concat, [1]]                          # 20 cat top-down P3
+  - [-1, 3, C2f, [256]]                                  # 21 ← P3 detection head
+
+  - [-1, 1, Conv, [256, 3, 2]]                          # 22 P3→P4
+  - [[-1, 12], 1, Concat, [1]]                          # 23 cat top-down P4
+  - [-1, 3, C2f, [512]]                                  # 24 ← P4 detection head
+
+  - [-1, 1, Conv, [512, 3, 2]]                          # 25 P4→P5
+  - [[-1, 9], 1, Concat, [1]]                           # 26 cat SPPF
+  - [-1, 3, C2f, [1024]]                                 # 27 ← P5 detection head
+
+  # 4-scale detection: P2(160×160), P3(80×80), P4(40×40), P5(20×20)
+  - [[18, 21, 24, 27], 1, Detect, [nc]]                 # 28
