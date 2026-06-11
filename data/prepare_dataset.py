@@ -94,7 +94,7 @@ def parse_tt100k_annotations(
     """
     logger.info(f"Loading annotations from {ann_path}")
 
-    with open(ann_path, "r") as f:
+    with open(ann_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     imgs = data.get("imgs", {})
@@ -255,7 +255,7 @@ def write_yolo_label(
         lines.append(f"{ann['class_id']} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
 
@@ -333,7 +333,7 @@ def generate_dataset_yaml(
         "names": names,
     }
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
     logger.info(f"Generated dataset config at {output_path}")

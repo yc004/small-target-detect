@@ -147,13 +147,13 @@ def save_metrics(metrics: Dict, filepath: Path) -> None:
             cleaned[k] = v.tolist()
         else:
             cleaned[k] = v
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(cleaned, f, indent=2)
 
 
 def load_metrics(filepath: Path) -> Dict:
     """Load metrics from a JSON file."""
-    with open(filepath, "r") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -180,7 +180,7 @@ def analyze_dataset_objects(
     for label_file in label_dir.glob("*.txt"):
         if not label_file.is_file():
             continue
-        with open(label_file, "r") as f:
+        with open(label_file, "r", encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) < 5:

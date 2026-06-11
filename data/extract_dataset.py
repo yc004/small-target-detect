@@ -187,7 +187,7 @@ def process_split(
 
         # Write filtered label
         label_out = output_labels_dir / f"{filename}.txt"
-        with open(label_out, "w") as f:
+        with open(label_out, "w", encoding="utf-8") as f:
             f.write(filtered + "\n")
 
         # Extract image
@@ -227,7 +227,7 @@ def generate_dataset_yaml(output_dir: Path) -> Path:
     }
 
     yaml_path = output_dir / "dataset.yaml"
-    with open(yaml_path, "w") as f:
+    with open(yaml_path, "w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
     logger.info(f"Dataset YAML written to {yaml_path}")

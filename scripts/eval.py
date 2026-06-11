@@ -82,7 +82,7 @@ def run_evaluation(
 
     # Temporarily modify data_yaml to point to test split if needed
     if split == "test":
-        with open(data_yaml, "r") as f:
+        with open(data_yaml, "r", encoding="utf-8") as f:
             data_config = yaml.safe_load(f)
         test_path = data_config.get("test", data_config.get("val"))
         logger.info(f"Evaluating on {split} split: {test_path}")
@@ -154,7 +154,7 @@ def analyze_predictions(
     from ultralytics import YOLO
 
     # Load data config
-    with open(data_yaml, "r") as f:
+    with open(data_yaml, "r", encoding="utf-8") as f:
         data_config = yaml.safe_load(f)
 
     test_path = data_config.get(split, data_config.get("val"))
@@ -226,7 +226,7 @@ def compare_with_baseline(
         logger.info("No baseline metrics file provided — skipping comparison.")
         return {}
 
-    with open(baseline_metrics_path, "r") as f:
+    with open(baseline_metrics_path, "r", encoding="utf-8") as f:
         baseline = json.load(f)
 
     comparison = {}
@@ -341,7 +341,7 @@ def main():
         comparison = compare_with_baseline(metrics, args.baseline)
         if comparison:
             comparison_path = args.save_dir / "comparison.json"
-            with open(comparison_path, "w") as f:
+            with open(comparison_path, "w", encoding="utf-8") as f:
                 json.dump(comparison, f, indent=2)
             logger.info(f"Comparison saved to {comparison_path}")
 
@@ -356,7 +356,7 @@ def main():
             device=args.device,
         )
         size_analysis_path = args.save_dir / "size_analysis.json"
-        with open(size_analysis_path, "w") as f:
+        with open(size_analysis_path, "w", encoding="utf-8") as f:
             json.dump(size_analysis, f, indent=2)
         logger.info(f"Size analysis saved to {size_analysis_path}")
 

@@ -24,3 +24,7 @@ runs/
 # IDE
 .vscode/
 .idea/
+
+data/Dataset-TT100K
+data/processed/dataset.yaml
+data/TT100K_raw

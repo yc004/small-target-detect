@@ -61,7 +61,7 @@ def analyze_labels(
         if not label_file.is_file():
             continue
         n_boxes = 0
-        with open(label_file, "r") as f:
+        with open(label_file, "r", encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) < 5:
@@ -258,7 +258,7 @@ def main():
     # Save stats JSON
     import json
     stats_path = args.save_dir / "dataset_stats.json"
-    with open(stats_path, "w") as f:
+    with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, default=float)
     logger.info(f"Statistics saved to {stats_path}")
 
