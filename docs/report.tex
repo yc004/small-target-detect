@@ -7,6 +7,20 @@
 
 \documentclass[12pt,a4paper,fontset=none]{ctexart}
 
+% ─── ctex numbering: 第一章、1.1、1.1.1 ──────────────────────────────────
+\ctexset{
+    section = {
+        name = {第,章},
+        number = \arabic{section},
+    },
+    subsection = {
+        number = \arabic{section}.\arabic{subsection},
+    },
+    subsubsection = {
+        number = \arabic{section}.\arabic{subsection}.\arabic{subsubsection},
+    },
+}
+
 % ─── Packages ─────────────────────────────────────────────────────────────────
 \usepackage[top=2.54cm, bottom=2.54cm, left=3.18cm, right=3.18cm]{geometry}
 \usepackage{graphicx}
@@ -35,8 +49,8 @@
 \setCJKfamilyfont{zhfs}{STFangsong}
 \setCJKfamilyfont{zhzongsong}{Songti SC}  % macOS 无华文中宋，用宋体替代
 
-\renewcommand{\songti}{\CJKfamily{zhsong}}
-\renewcommand{\heiti}{\CJKfamily{zhhei}}
+\newcommand{\songti}{\CJKfamily{zhsong}}
+\newcommand{\heiti}{\CJKfamily{zhhei}}
 \newcommand{\kaishu}{\CJKfamily{zhkai}}
 \newcommand{\fangsong}{\CJKfamily{zhfs}}
 \newcommand{\zongsong}{\CJKfamily{zhzongsong}}
@@ -110,6 +124,14 @@
 
 \end{center}
 \end{titlepage}
+
+% ─── Table of Contents ────────────────────────────────────────────────────────
+\setcounter{page}{1}
+\pagenumbering{Roman}
+\tableofcontents
+\newpage
+\setcounter{page}{1}
+\pagenumbering{arabic}
 
 % ═══════════════════════════════════════════════════════════════════════════════
 % 第1章  作品概述
