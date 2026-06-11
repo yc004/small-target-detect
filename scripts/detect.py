@@ -248,7 +248,7 @@ def main():
     parser.add_argument(
         "--save_dir",
         type=Path,
-        default=Path("experiments/detect_results"),
+        default=Path("runs/detect_results"),
         help="Directory to save detection results",
     )
     parser.add_argument(

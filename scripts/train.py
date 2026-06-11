@@ -20,6 +20,8 @@ from pathlib import Path
 
 import yaml
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -60,6 +62,12 @@ def train(config: dict) -> None:
         config: Training configuration dictionary.
     """
     from ultralytics import YOLO
+
+    # Resolve project path relative to project root
+    project = config.get("project", "runs")
+    if not Path(project).is_absolute():
+        project = str(PROJECT_ROOT / project)
+        config["project"] = project
 
     # Log config (mask sensitive keys if any)
     logger.info("Training configuration:")
@@ -118,7 +126,7 @@ def train(config: dict) -> None:
             max_det=config.get("max_det", 300),
             amp=config.get("amp", True),
             close_mosaic=config.get("close_mosaic", 10),
-            project=config.get("project", "experiments/stage1_baseline"),
+            project=config.get("project", "runs/stage1_baseline"),
             name=config.get("name", "train"),
             exist_ok=config.get("exist_ok", True),
             val=config.get("val", True),

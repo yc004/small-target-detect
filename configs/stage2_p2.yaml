@@ -12,9 +12,9 @@ rect: false
 
 # Training (P2 adds ~65% more FLOPs, reduce batch to fit VRAM)
 epochs: 100
-batch: 12                        # Down from 16 (baseline) for P2 overhead
+batch: 8                        # Down from 16 (baseline) for P2 overhead
 workers: 8
-device: mps
+device: "0"
 amp: false
 
 # Optimization
@@ -51,7 +51,7 @@ iou: 0.7
 max_det: 300
 
 # Logging
-project: "experiments/stage2_p2"
+project: "runs/stage2_p2"
 name: "train"
 exist_ok: true
 val: true

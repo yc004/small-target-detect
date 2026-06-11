@@ -74,7 +74,7 @@ REM Auto-detect device
 for /f "delims=" %%d in ('python -c "import torch; print('cuda' if torch.cuda.is_available() else 'cpu')"') do set "DEVICE=%%d"
 echo [%time%]   Device: %DEVICE%
 
-python scripts/train.py --config configs/baseline.yaml --epochs 100 --batch 8 --imgsz 1280 --device %DEVICE% --project experiments/stage1_baseline --name train
+python scripts/train.py --config configs/baseline.yaml --epochs 100 --batch 8 --imgsz 1280 --device %DEVICE% --project runs/stage1_baseline --name train
 
 echo.
 echo [%time%] Done! Best model: experiments\stage1_baseline\train\weights\best.pt

@@ -10,7 +10,7 @@ Computes COCO-style metrics with a focus on small target performance:
 
 Usage:
     # Evaluate on test set
-    python scripts/eval.py --weights experiments/stage1_baseline/weights/best.pt \\
+    python scripts/eval.py --weights runs/stage1_baseline/weights/best.pt \\
                            --data data/processed/dataset.yaml \\
                            --split test
 

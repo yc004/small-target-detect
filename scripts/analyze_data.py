@@ -213,7 +213,7 @@ def main():
     parser.add_argument(
         "--save_dir",
         type=Path,
-        default=Path("experiments/data_analysis"),
+        default=Path("runs/data_analysis"),
         help="Directory to save analysis outputs",
     )
 

@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 
 DATASET_PATH="${TT100K_PATH:-/public/data/image/TT100K}"
 OUTPUT_DIR="data/processed"
-EXPERIMENT_DIR="experiments/stage1_baseline"
+EXPERIMENT_DIR="runs/stage1_baseline"
 UNZIP_DIR="data/TT100K_raw"
 BATCH_SIZE="${BATCH_SIZE:-8}"
 IMG_SIZE="${IMG_SIZE:-1280}"

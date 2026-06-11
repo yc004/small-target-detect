@@ -59,7 +59,7 @@ max_det: 300                    # Max detections per image
 close_mosaic: 10                # Disable mosaic for last 10 epochs
 
 # Logging
-project: "experiments/stage1_baseline"
+project: "runs/stage1_baseline"
 name: "train"
 exist_ok: true                  # Overwrite existing experiment
 
