@@ -1,11 +1,14 @@
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 2: YOLO26s-P2 (Official High-Resolution Detection Layer)
+# Stage 6: Full Integration — All Improvements Combined
 # ────────────────────────────────────────────────────────────────────────────
-# 使用官方 yolo26s-p2.yaml，增加 P2/4 检测层，提升小目标特征分辨率。
-# Batch 减半以容纳 P2 层约 25% 的 FLOPs 增长。
+# Model: YOLO26s-P2 + ARF-Head + BCEM
+# Loss:  HJ-Loss (WIoUv3 + NWD for P2/P3)
+# Post:  Soft-NMS (Gaussian, σ=0.5)
+#
+# This is the final model for evaluation, ablation comparison, and demo.
 # ────────────────────────────────────────────────────────────────────────────
 
-model: "yolo26s-p2.yaml"           # Official YOLO26 small with P2 detection head
+model: "models/yolo26s_p2_arf_bcem.yaml"
 pretrained: true
 
 # Data
@@ -13,9 +16,9 @@ data: "data/processed/dataset.yaml"
 imgsz: 640
 rect: false
 
-# Training (P2 adds ~25% FLOPs → reduce batch to fit VRAM)
+# Training
 epochs: 100
-batch: 8                          # Down from 16 for P2 overhead
+batch: 8
 workers: 8
 device: "0"
 amp: false
@@ -48,13 +51,13 @@ flipud: 0.0
 fliplr: 0.5
 close_mosaic: 10
 
-# Post-processing
-conf: 0.001
-iou: 0.7
+# Post-processing (inference)
+conf: 0.25                       # Higher threshold for demo / final eval
+iou: 0.5                         # Soft-NMS IoU threshold
 max_det: 300
 
 # Logging
-project: "experiments/stage2_p2"
+project: "experiments/stage6_full"
 name: "train"
 exist_ok: true
 val: true

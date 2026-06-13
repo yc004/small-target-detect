@@ -1,11 +1,12 @@
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 2: YOLO26s-P2 (Official High-Resolution Detection Layer)
+# Stage 5: YOLO26s-P2 + ARF-Head + BCEM + HJ-Loss
 # ────────────────────────────────────────────────────────────────────────────
-# 使用官方 yolo26s-p2.yaml，增加 P2/4 检测层，提升小目标特征分辨率。
-# Batch 减半以容纳 P2 层约 25% 的 FLOPs 增长。
+# 在 Stage 4 基础上，用分层联合损失 (HJ-Loss) 替换默认 CIoU Loss。
+# - P2/P3 层: WIoUv3 + 0.3×NWD (联合监督，尺度鲁棒的定位)
+# - P4/P5 层: WIoUv3 (仅动态聚焦，避免 NWD 对大目标的噪声)
 # ────────────────────────────────────────────────────────────────────────────
 
-model: "yolo26s-p2.yaml"           # Official YOLO26 small with P2 detection head
+model: "models/yolo26s_p2_arf_bcem.yaml"  # Same model as Stage 4
 pretrained: true
 
 # Data
@@ -13,9 +14,9 @@ data: "data/processed/dataset.yaml"
 imgsz: 640
 rect: false
 
-# Training (P2 adds ~25% FLOPs → reduce batch to fit VRAM)
+# Training
 epochs: 100
-batch: 8                          # Down from 16 for P2 overhead
+batch: 8
 workers: 8
 device: "0"
 amp: false
@@ -53,8 +54,18 @@ conf: 0.001
 iou: 0.7
 max_det: 300
 
+# ── HJ-Loss specific settings ──────────────────────────────────────────
+# Note: HJ-Loss is injected via model_builder or a training callback.
+# The loss module replaces ultralytics' default CIoU with WIoUv3 + NWD.
+# Key parameters (stored here for documentation):
+#   nwd_weight: 0.3     # NWD auxiliary loss weight
+#   nwd_layers: [P2, P3]  # Layers using NWD (small targets only)
+#   nwd_c: 12.0          # NWD normalization constant
+#   wiouv3_delta: 2.0    # WIoUv3 dynamic focus strength
+# ────────────────────────────────────────────────────────────────────────
+
 # Logging
-project: "experiments/stage2_p2"
+project: "experiments/stage5_hjloss"
 name: "train"
 exist_ok: true
 val: true

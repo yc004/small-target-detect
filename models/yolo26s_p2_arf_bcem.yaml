@@ -1,0 +1,79 @@
+# ────────────────────────────────────────────────────────────────────────────
+# Stage 4: YOLO26s-P2 + ARF-Head + BCEM
+# ────────────────────────────────────────────────────────────────────────────
+# BCEM (Bi-directional Context Enhancement Module) purifies backbone features
+# at each FPN skip connection: channel attention + spatial attention,
+# multiplicative fusion, residual connection.
+#
+# NOTE: Single-input layers (BCEM, ARF) use integer 'from'.
+#       Concat/Detect use list 'from' for multiple inputs.
+# ────────────────────────────────────────────────────────────────────────────
+
+nc: 80  # overridden at build time
+end2end: True
+reg_max: 1
+
+scales:
+  n: [0.50, 0.25, 1024]
+  s: [0.50, 0.50, 1024]
+  m: [0.50, 1.00, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.50, 512]
+
+# ── Backbone (unchanged) ───────────────────────────────────────────────
+
+backbone:
+  - [-1, 1, Conv, [64, 3, 2]]           # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]          # 1-P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]   # 2
+  - [-1, 1, Conv, [256, 3, 2]]          # 3-P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]]   # 4
+  - [-1, 1, Conv, [512, 3, 2]]          # 5-P4/16
+  - [-1, 2, C3k2, [512, True]]          # 6
+  - [-1, 1, Conv, [1024, 3, 2]]         # 7-P5/32
+  - [-1, 2, C3k2, [1024, True]]         # 8
+  - [-1, 1, SPPF, [1024, 5, 3, True]]   # 9
+  - [-1, 2, C2PSA, [1024]]              # 10
+
+# ── Head (yolo26-p2.yaml + BCEM + ARF) ─────────────────────────────────
+
+head:
+  # FPN top-down: Upsample → BCEM(backbone) → Concat → C3k2
+  # Channel values are for scale='s' (width=0.50):
+  #   backbone P2=128*0.5=128, P3=256*0.5=256, P4=512*0.5=256
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]     # 11: upsample P5 features
+  - [6, 1, BCEM, [256]]                              # 12: BCEM purify backbone P4 (layer 6, 512→256)
+  - [[11, 12], 1, Concat, [1]]                       # 13: cat(upsampled_P5, BCEM'd_P4)
+  - [-1, 2, C3k2, [512, True]]                      # 14
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]     # 15: upsample
+  - [4, 1, BCEM, [256]]                              # 16: BCEM purify backbone P3 (layer 4, 256→256)
+  - [[15, 16], 1, Concat, [1]]                       # 17: cat(upsampled, BCEM'd_P3)
+  - [-1, 2, C3k2, [256, True]]                      # 18 (P3/8-small)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]     # 19: upsample
+  - [2, 1, BCEM, [128]]                              # 20: BCEM purify backbone P2 (layer 2, 128→128)
+  - [[19, 20], 1, Concat, [1]]                       # 21: cat(upsampled, BCEM'd_P2)
+  - [-1, 2, C3k2, [128, True]]                      # 22 (P2/4-xsmall)
+
+  # PAN bottom-up (BCEM already applied — features are purified)
+  - [-1, 1, Conv, [128, 3, 2]]                      # 23
+  - [[-1, 18], 1, Concat, [1]]                       # 24: cat(downsampled, P3 features)
+  - [-1, 2, C3k2, [256, True]]                      # 25 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]]                      # 26
+  - [[-1, 14], 1, Concat, [1]]                       # 27: cat(downsampled, P4 features)
+  - [-1, 2, C3k2, [512, True]]                      # 28 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]]                      # 29
+  - [[-1, 10], 1, Concat, [1]]                       # 30: cat(downsampled, P5 backbone)
+  - [-1, 1, C3k2, [1024, True, 0.5, True]]          # 31 (P5/32-large)
+
+  # ARF modules — scaled for scale='s' (width=0.50, max_channels=1024)
+  - [22, 1, ARF, [64, [1, 3, 5]]]                   # 32: ARF-P2 (128*0.5=64)
+  - [25, 1, ARF, [128, [1, 2, 3]]]                  # 33: ARF-P3 (256*0.5=128)
+  - [28, 1, ARF, [256, [1, 1, 2]]]                  # 34: ARF-P4 (512*0.5=256)
+  - [31, 1, ARF, [512, [1, 1, 1]]]                  # 35: ARF-P5 (1024*0.5=512)
+
+  # Detection
+  - [[32, 33, 34, 35], 1, Detect, [nc]]             # 36: Detect(P2, P3, P4, P5)

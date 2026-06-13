@@ -1,20 +1,18 @@
-# 小目标交通标志检测 — 渐进式实现方案
+# 基于改进 YOLO26 的小目标交通标志检测 — 渐进式实现方案
 
 ## 总览
 
 ```
-Stage 1 (基线)          →  Stage 2 (+P2)       →  Stage 3 (+ECA)
-  ─── 数据准备              ─── 高分辨率检测头        ─── 通道注意力
-  ─── 基线训练              ─── 小目标召回验证         ─── 特征表达增强
-  ─── 基准指标              ─── mAP 对比              ─── 小目标 AP 提升
+Stage 1 (基线)        → Stage 2 (+官方P2)     → Stage 3 (+ARF-Head)
+  官方 YOLO26s            官方 P2 高分辨率          自适应感受野检测头
+  数据流验证              小目标召回验证             尺度感知的特征提取
 
-Stage 4 (+CopyPaste)    →  Stage 5 (+SoftNMS)   →  Stage 6 (集成+交付)
-  ─── 数据增强              ─── 后处理替换            ─── 消融实验
-  ─── 泛化能力提升           ─── 减少误检/漏检         ─── 实时 Demo
-  ─── 鲁棒性验证             ─── 精度微调              ─── 最终报告
+Stage 4 (+BCEM)       → Stage 5 (+HJ-Loss)     → Stage 6 (集成+交付)
+  双向上下文增强           分层联合损失              消融实验 + Demo
+  前景/背景判别            小目标定位精度             完整系统交付
 ```
 
-每一个 Stage 都是**可独立验证的里程碑**，产出可量化的指标，下一阶段建立在上一阶段稳定的代码之上。
+每一个 Stage 都是**可独立验证的里程碑**，下一阶段建立在上一阶段稳定的代码之上。
 
 ---
 
@@ -23,700 +21,845 @@ Stage 4 (+CopyPaste)    →  Stage 5 (+SoftNMS)   →  Stage 6 (集成+交付)
 ```
 small_target_detect/
 ├── data/
-│   ├── TT100K/                    # 原始数据集（需下载）
-│   ├── processed/                 # 转换后的 YOLO 格式标签
-│   ├── dataset.yaml               # YOLO 数据集配置
-│   └── prepare_dataset.py         # 数据预处理脚本
+│   ├── TT100K/                        # 原始数据集（需手动下载）
+│   ├── processed/                     # 转换后的 YOLO 格式标签
+│   │   ├── dataset.yaml               # YOLO 数据集配置
+│   │   ├── images/{train,val,test}/   # 划分后的图片
+│   │   └── labels/{train,val,test}/   # YOLO 格式标注
+│   ├── prepare_dataset.py             # 数据预处理脚本
+│   └── extract_dataset.py             # 备选：从预打包 ZIP 提取
 ├── models/
-│   ├── yolov8s_p2.yaml            # Stage 2: +P2 检测层
-│   ├── yolov8s_p2_eca.yaml        # Stage 3: +P2 + ECA
-│   ├── attention.py               # ECA / CBAM 等注意力模块
-│   └── model_builder.py           # 模型构建工具
-├── augment/
-│   └── copy_paste.py              # Stage 4: Copy-Paste 增强
+│   ├── yolo26s_p2_arf.yaml            # Stage 3: P2 + ARF-Head 模型配置
+│   ├── yolo26s_p2_arf_bcem.yaml       # Stage 4: + BCEM
+│   ├── arf_head.py                    # ARF-Head 模块实现
+│   ├── bcem.py                        # BCEM 模块实现
+│   ├── hj_loss.py                     # HJ-Loss 分层联合损失函数
+│   └── model_builder.py               # 模型构建工具（注入自定义模块）
 ├── utils/
-│   ├── soft_nms.py                # Stage 5: Soft-NMS 实现
-│   ├── visualization.py           # 检测结果可视化
-│   └── metrics.py                 # 小目标专项评估
+│   ├── soft_nms.py                    # Soft-NMS 实现
+│   ├── visualization.py               # 检测结果可视化 + PR 曲线
+│   └── metrics.py                     # COCO 小/中/大目标分类评估
 ├── configs/
-│   ├── baseline.yaml              # 基线训练配置
-│   └── improved.yaml              # 改进模型训练配置
-├── experiments/
-│   ├── stage1_baseline/           # 各阶段实验输出
+│   ├── stage1_baseline.yaml           # Stage 1: YOLO26s 基线
+│   ├── stage2_p2.yaml                 # Stage 2: YOLO26s-P2 官方
+│   ├── stage3_arf_head.yaml           # Stage 3: + ARF-Head
+│   ├── stage4_bcem.yaml               # Stage 4: + BCEM
+│   ├── stage5_hjloss.yaml             # Stage 5: + HJ-Loss
+│   └── stage6_full.yaml               # Stage 6: 最终集成配置
+├── experiments/                       # 各阶段实验输出
+│   ├── stage1_baseline/
 │   ├── stage2_p2/
-│   ├── stage3_eca/
-│   ├── stage4_copypaste/
-│   ├── stage5_softnms/
+│   ├── stage3_arf_head/
+│   ├── stage4_bcem/
+│   ├── stage5_hjloss/
 │   └── stage6_full/
 ├── scripts/
-│   ├── train.py                   # 统一训练入口
-│   ├── detect.py                  # 图片/视频批量推理
-│   ├── eval.py                    # 评估脚本
-│   └── demo.py                    # 实时摄像头演示
+│   ├── __init__.py
+│   ├── train.py                       # 统一训练入口
+│   ├── detect.py                      # 图片/视频批量推理
+│   ├── eval.py                        # COCO 评估脚本
+│   ├── demo.py                        # 实时摄像头演示
+│   ├── analyze_data.py                # 数据集统计分析
+│   ├── setup_server.sh                # Linux 一键部署脚本
+│   └── setup_server.bat               # Windows 一键部署脚本
+├── docs/
+│   ├── generate_report.py             # Word 报告自动生成
+│   ├── report.tex                     # LaTeX 报告源码
+│   ├── 作品报告_*.docx                # 生成的 Word 报告
+│   └── 作品报告模板.docx              # 报告模板
 ├── pyproject.toml
 ├── requirements.txt
+├── uv.lock
 └── README.md
 ```
 
 ---
 
-## Stage 1: 基线搭建（Baseline）
+## Stage 1: YOLO26s 基线
 
-**目标**：跑通数据流，获得基线指标作为对比基准。
+**目标**：用官方 YOLO26s 跑通完整数据流，获得所有基准指标。
 
 ### 工作内容
 
 | 序号 | 任务 | 产出 |
 |------|------|------|
-| 1.1 | 下载 TT100K 数据集，筛选 5 类小目标 (`i2, i4, i5, io, p10`) | `data/TT100K/` 原始数据 |
-| 1.2 | 编写 [data/prepare_dataset.py](data/prepare_dataset.py)：标注格式转换 → YOLO 归一化，7:2:1 划分 | `data/processed/` + `dataset.yaml` |
-| 1.3 | 数据分析：统计小目标占比（面积 < 32×32 px），类别分布，anchor 尺寸分布 | `experiments/stage1_baseline/data_analysis.md` |
-| 1.4 | 使用官方 `yolov8s.yaml` 训练基线模型，100 epoch，imgsz=1280 | `experiments/stage1_baseline/weights/best.pt` |
-| 1.5 | 评估基线：mAP@0.5, mAP@0.5:0.95, AP_S, FPS | `experiments/stage1_baseline/metrics.json` |
-| 1.6 | 编写评估脚本 [scripts/eval.py](scripts/eval.py)：支持按 COCO 小/中/大目标分组统计 | 可复用评估工具 |
+| 1.1 | 确保数据集就绪：`data/processed/` 下有正确的 YOLO 格式标注和 `dataset.yaml` | 可训练的数据集 |
+| 1.2 | 编写 `configs/stage1_baseline.yaml`，使用 `yolo26s.yaml` | 训练配置 |
+| 1.3 | 执行 `python scripts/train.py --config configs/stage1_baseline.yaml` | `experiments/stage1_baseline/weights/best.pt` |
+| 1.4 | 执行 `python scripts/eval.py --weights best.pt --data data/processed/dataset.yaml --analyze_sizes` | `metrics.json` (含 AP_S/AP_M/AP_L) |
+| 1.5 | 执行 `python scripts/analyze_data.py` 获取数据集统计 | 小目标占比、类别分布报告 |
 
-### 关键代码设计
+### 关键配置
 
-```python
-# data/prepare_dataset.py 核心逻辑
-def convert_tt100k_to_yolo(ann_file, class_map, img_size=(2048, 2048)):
-    """
-    TT100K 原始标注 → YOLO 格式
-    - 输入: TT100K 的 JSON 标注
-    - 输出: 每张图一个 .txt, class_id cx cy w h (归一化)
-    - 筛选: 只保留 class_map 中 5 类，过滤掉非目标类别
-    """
-    ...
-
-def split_dataset(image_dir, label_dir, ratio=(0.7, 0.2, 0.1)):
-    """
-    按 7:2:1 划分 train/val/test
-    - 生成 train.txt, val.txt, test.txt（图片路径列表）
-    - 生成 dataset.yaml（路径 + 类别名）
-    """
-    ...
-
-# configs/baseline.yaml
-train:
-  model: yolov8s.yaml       # 官方未修改
-  data: data/dataset.yaml
-  epochs: 100
-  imgsz: 1280
-  batch: 8
-  device: 0
-  workers: 8
-  patience: 20               # 早停
-  cos_lr: true
-  close_mosaic: 10           # 最后 10 epoch 关闭 mosaic
+```yaml
+# configs/stage1_baseline.yaml
+model: "yolo26s.yaml"          # 官方 YOLO26 small
+pretrained: true
+data: "data/processed/dataset.yaml"
+imgsz: 640
+epochs: 100
+batch: 16
+device: "0"
+optimizer: "auto"              # SGD (YOLO26s 属于 small 模型)
+lr0: 0.01
+cos_lr: true
+patience: 20                   # 早停
+close_mosaic: 10               # 最后 10 epoch 关闭 mosaic
+mosaic: 1.0
+mixup: 0.0
+copy_paste: 0.0
+project: "experiments/stage1_baseline"
 ```
 
 ### 验证标准
-- [ ] 数据集正确加载，5 类目标标签完整
-- [ ] 小目标（<32×32）占总标注框的 __% (需实测)
-- [ ] 基线 mAP@0.5 记录在案
-- [ ] 推理 FPS 在 RTX 3060 上记录
+- [ ] 训练成功收敛（无 OOM/NaN）
+- [ ] 记录 mAP@0.5, mAP@0.5:0.95, AP_S, FPS
+- [ ] 数据集统计确认：小目标 (< 32×32 px) 占比 > 40%
+- [ ] 基线模型参数量 & FLOPs 记录在案
 
 ### 预期指标记录模板
 
-| 指标 | 基线 YOLOv8s |
-|------|-------------|
-| mAP@0.5 | ? |
-| mAP@0.5:0.95 | ? |
-| AP_S (small) | ? |
-| AP_M (medium) | ? |
-| FPS (1280×1280) | ? |
-| 参数量 | 11.1M |
-| FLOPs | 28.6G |
+| 指标 | YOLO26s (Stage 1) | 备注 |
+|------|:---:|------|
+| mAP@0.5 | ? | COCO 标准评估 |
+| mAP@0.5:0.95 | ? | |
+| AP_S (small, <32²) | ? | 核心关注指标 |
+| AP_M (medium) | ? | |
+| AP_L (large) | ? | |
+| FPS (640×640, GPU) | ? | |
+| 参数量 | 10.01M | 官方数据 |
+| GFLOPs | 22.8 | 官方数据 |
 
 ---
 
-## Stage 2: P2 高分辨率检测层
+## Stage 2: 官方 YOLO26s-P2 高分辨率检测层
 
-**改进原理**：YOLOv8s 默认有 P3(80×80), P4(40×40), P5(20×20) 三个检测头。P3 的下采样倍数=8，对于 1280×1280 输入，P3 特征图上每个 cell 对应 8×8 像素区域。如果一个标志只有 16×16 像素，在 P3 上仅占 2×2 个 cell，特征表达极弱。增加 P2(160×160) 头使下采样倍数为 4，同样 16×16 的标志在 P2 上占 4×4 个 cell，特征表达能力翻倍。
+**目标**：使用 ultralytics 官方 `yolo26s-p2.yaml` 训练，量化 P2 层对小目标检测的贡献。
+
+### 原理
+
+YOLO26 默认 3 个检测头 (P3/8, P4/16, P5/32)。增加 P2/4 层后：
+- 16×16 px 的目标在 P3 上仅占 2×2 cells → P2 上占 4×4 cells
+- 特征分辨率的翻倍使得小目标的定位精度和分类置信度都能提升
+- 官方 P2 变体经过 ultralytics 充分测试，稳定性有保障
 
 ### 工作内容
 
 | 序号 | 任务 | 产出 |
 |------|------|------|
-| 2.1 | 编写 [models/yolov8s_p2.yaml](models/yolov8s_p2.yaml)：修改 head 结构，添加 P2 层 | 模型配置文件 |
-| 2.2 | 修改 Neck：将 backbone 第 2 层 (P2, stride=4) 的特征引入 FPN，与 P3 上采样拼接 | 配置文件改动 |
-| 2.3 | 训练 P2 模型，其他配置与 Stage 1 完全相同（控制变量） | `experiments/stage2_p2/` |
-| 2.4 | 对比 Stage 1：重点观察 AP_S 变化、小目标召回率 Recall@S | 对比报告 |
-| 2.5 | 分析 P2 检测头的计算开销（参数量增量、FPS 变化） | 开销分析 |
+| 2.1 | 创建 `configs/stage2_p2.yaml`，指向 `yolo26s-p2.yaml` | 训练配置 |
+| 2.2 | 执行训练（batch 减半以容纳 P2 层的额外计算） | `experiments/stage2_p2/weights/best.pt` |
+| 2.3 | 评估 + 与 Stage 1 对比 | 对比报告 |
+| 2.4 | 分析 P2 层的计算开销 | 开销分析 |
 
-### YAML 核心改动
+### 配置改动
 
 ```yaml
-# models/yolov8s_p2.yaml (关键部分)
-# YOLOv8s backbone (不变)
-backbone:
-  - [-1, 1, Conv, [64, 3, 2]]                  # 0-P1/2
-  - [-1, 1, Conv, [128, 3, 2]]                 # 1-P2/4  ← 新增引入
-  - [-1, 3, C2f, [128, True]]
-  - [-1, 1, Conv, [256, 3, 2]]                 # 3-P3/8
-  - [-1, 6, C2f, [256, True]]
-  - [-1, 1, Conv, [512, 3, 2]]                 # 5-P4/16
-  - [-1, 6, C2f, [512, True]]
-  - [-1, 1, Conv, [1024, 3, 2]]               # 7-P5/32
-  - [-1, 3, C2f, [1024, True]]
-  - [-1, 1, SPPF, [1024, 5]]                  # 9
-
-head:
-  # 上采样阶段（自顶向下）
-  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
-  - [[-1, 6], 1, Concat, [1]]                  # cat P4
-  - [-1, 3, C2f, [512]]
-  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
-  - [[-1, 4], 1, Concat, [1]]                  # cat P3
-  - [-1, 3, C2f, [256]]
-  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]  # ← 新增：继续上采样
-  - [[-1, 2], 1, Concat, [1]]                  # ← 新增：cat P2 (layer 2)
-  - [-1, 3, C2f, [128]]                        # ← 新增：P2 特征融合
-
-  # 下采样阶段（自底向上）
-  - [-1, 1, Conv, [128, 3, 2]]                 # ← 新增：P2 下采样
-  - [[-1, 15], 1, Concat, [1]]                 # ← 新增：cat 上采样 P3 输出
-  - [-1, 3, C2f, [256]]                        # P3 增强
-  - [-1, 1, Conv, [256, 3, 2]]
-  - [[-1, 12], 1, Concat, [1]]
-  - [-1, 3, C2f, [512]]                        # P4 增强
-  - [-1, 1, Conv, [512, 3, 2]]
-  - [[-1, 9], 1, Concat, [1]]
-  - [-1, 3, C2f, [1024]]                       # P5 增强
-
-  # 检测头（4 个尺度）
-  - [[19, 22, 25, 28], 1, Detect, [nc]]
-  #   ↑ P2  ↑ P3  ↑ P4  ↑ P5
+# configs/stage2_p2.yaml
+model: "yolo26s-p2.yaml"       # 官方 P2 变体
+batch: 8                        # 减半（P2 增加 ~25% FLOPs）
+project: "experiments/stage2_p2"
+# 其余与 baseline 完全相同
 ```
 
-### 关键注意事项
-- YOLOv8 的 `Detect` 模块输出 channel 数 = `(nc + 4) × reg_max`（anchor-free），4 个检测头会自动适配
-- 需要确保 Concat 的索引号正确（layer 编号需要精确数算）
-- 引入 P2 后训练速度大约下降 20-30%（多了一个大特征图的处理），这是正常的
+### YOLO26s-P2 架构关键信息
+- 4 个检测头：P2(160×160), P3(80×80), P4(40×40), P5(20×20)
+- Neck 中相比标准版增加：1 次额外的上采样 + 1 次额外的下采样 + 对应的 C3k2 特征融合
+- P2 层通道数 = 128（最轻量，不会过度增加计算量）
+- 参数量：~9.77M (s 变体)，GFLOPs：~27.8
 
 ### 验证标准
 - [ ] P2 模型成功训练不报错
-- [ ] AP_S 相比基线提升 ≥ 3%（保守预期）
-- [ ] 肉眼对比：小目标的检测框更完整、漏检减少
-- [ ] 计算开销在可接受范围（FPS 下降 < 30%）
+- [ ] AP_S 相比 Stage 1 提升 ≥ 5%（P2 对小目标的直接增益）
+- [ ] 小目标漏检率显著降低（肉眼对比检测结果）
+- [ ] FPS 下降 < 30%
 
 ---
 
-## Stage 3: ECA 通道注意力
+## Stage 3: ARF-Head — 自适应感受野检测头 ⭐ 原创
 
-**改进原理**：YOLOv8 的 Neck（FPN+PAN）在各尺度特征图之间传递信息，但 C2f 模块内部没有显式的通道重要性建模。ECA（Efficient Channel Attention）通过 1D 卷积捕获局部跨通道交互，以极小的计算开销（几乎可忽略）让网络自适应地关注重要通道，抑制噪声通道。对小目标而言，通道中选择性地增强精细纹理特征尤为有效。
+**改进原理**：不同检测层负责不同尺度的目标，但对感受野的需求不同。P2 检测极小目标时，需要略大的感受野来捕获上下文（区分目标 vs 噪声）；P5 检测大目标时，感受野已经很大，再增加反而有害。标准 YOLO26 所有检测头使用相同结构，缺乏这种尺度感知能力。
 
 ### 工作内容
 
 | 序号 | 任务 | 产出 |
 |------|------|------|
-| 3.1 | 实现 ECA 模块 ([models/attention.py](models/attention.py))：支持可配 kernel_size | 可复用注意力模块 |
-| 3.2 | 编写 [models/yolov8s_p2_eca.yaml](models/yolov8s_p2_eca.yaml)：在各检测层前的 C2f 后插入 ECA | 模型配置 |
-| 3.3 | 实现模型构建工具 ([models/model_builder.py](models/model_builder.py))：解析 yaml 并注入 ECA 模块 | 构建工具 |
-| 3.4 | 训练 P2+ECA 模型 | `experiments/stage3_eca/` |
-| 3.5 | 对比 Stage 2：验证 ECA 是否带来精度的进一步提升 | 对比报告 |
+| 3.1 | 实现 ARF 模块 (`models/arf_head.py`) | 可复用的 ARF 模块 |
+| 3.2 | 编写 `models/yolo26s_p2_arf.yaml`：在 P2/P3/P4/P5 各检测层前插入 ARF | 模型配置 |
+| 3.3 | 编写 `models/model_builder.py`：解析 yaml 并注入 ARF 模块 | 模型构建工具 |
+| 3.4 | 编写 `configs/stage3_arf_head.yaml` | 训练配置 |
+| 3.5 | 训练 + 对比 Stage 2 | 对比报告 |
 
-### ECA 实现细节
+### ARF 模块实现
 
 ```python
-# models/attention.py
+# models/arf_head.py
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-class ECA(nn.Module):
+class ARF(nn.Module):
     """
-    Efficient Channel Attention (ECA-Net, CVPR 2020)
-    通过 1D 卷积实现局部跨通道交互，无降维，几乎无额外计算开销。
+    Adaptive Receptive Field Module (ARF)
     
-    kernel_size 自适应公式: k = |(log2(C) / γ + b/γ)|_odd
-    其中 γ=2, b=1 是推荐参数
+    通过多分支空洞卷积 + 可学习 softmax 融合，
+    为不同检测层提供尺度感知的自适应感受野。
+    
+    空洞率根据检测层自适应配置：
+      - P2 (stride=4):  [1, 3, 5] — 适度扩大 RF
+      - P3 (stride=8):  [1, 2, 3] — 轻微扩大
+      - P4 (stride=16): [1, 1, 2] — 几乎不变
+      - P5 (stride=32): [1, 1, 1] — 标准卷积
     """
-    def __init__(self, channels, k_size=None, gamma=2, b=1):
+    
+    def __init__(self, channels, dilations=(1, 3, 5)):
         super().__init__()
-        if k_size is None:
-            # 自适应 kernel size
-            t = int(abs((torch.log2(torch.tensor(channels, dtype=torch.float32)) 
-                         / gamma + b / gamma)))
-            k_size = t if t % 2 == 1 else t + 1
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=k_size//2, bias=False)
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        # x: (B, C, H, W)
-        b, c, h, w = x.shape
-        y = self.avg_pool(x)                    # (B, C, 1, 1)
-        y = y.squeeze(-1).transpose(-1, -2)     # (B, 1, C)
-        y = self.conv(y)                        # (B, 1, C)
-        y = y.transpose(-1, -2).unsqueeze(-1)   # (B, C, 1, 1)
-        y = self.sigmoid(y)
-        return x * y.expand_as(x)
-
-
-class CBAM(nn.Module):
-    """
-    (可选) CBAM 作为对比方案 — 同时使用通道+空间注意力
-    在消融实验中可与 ECA 对比
-    """
-    def __init__(self, channels, reduction=16):
-        super().__init__()
-        # 通道注意力
-        self.channel_attn = nn.Sequential(
+        self.branches = nn.ModuleList([
+            nn.Sequential(
+                # 深度可分离卷积：空间维度用 depthwise，通道维度用 pointwise
+                nn.Conv2d(channels, channels, 3, padding=d, dilation=d, groups=channels, bias=False),
+                nn.Conv2d(channels, channels, 1, bias=False),
+                nn.BatchNorm2d(channels),
+                nn.SiLU(),
+            )
+            for d in dilations
+        ])
+        
+        # 可学习的分支权重
+        self.weight_net = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(channels, channels // reduction, 1),
+            nn.Conv2d(channels, channels // 4, 1, bias=False),
             nn.ReLU(),
-            nn.Conv2d(channels // reduction, channels, 1),
-            nn.Sigmoid(),
+            nn.Conv2d(channels // 4, len(dilations), 1, bias=False),
+            nn.Softmax(dim=1),
         )
-        # 空间注意力
-        self.spatial_attn = nn.Sequential(
-            nn.Conv2d(2, 1, 7, padding=3),
-            nn.Sigmoid(),
+        
+        # 输出投影
+        self.proj = nn.Sequential(
+            nn.Conv2d(channels, channels, 1, bias=False),
+            nn.BatchNorm2d(channels),
         )
-
+    
     def forward(self, x):
-        ca = self.channel_attn(x)
-        x = x * ca
-        sa = self.spatial_attn(
-            torch.cat([x.mean(1, keepdim=True), x.max(1, keepdim=True)[0]], dim=1)
-        )
-        return x * sa
+        # 各分支输出
+        branch_outs = [branch(x) for branch in self.branches]  # list of (B,C,H,W)
+        
+        # 可学习权重
+        weights = self.weight_net(x)  # (B, num_branches, 1, 1)
+        
+        # 加权融合
+        fused = sum(w * out for w, out in zip(
+            weights.split(1, dim=1), branch_outs
+        ))
+        
+        # 残差连接 + 投影
+        return self.proj(fused) + x
+
+
+# 不同检测层的空洞率配置
+ARF_CONFIGS = {
+    'P2': (1, 3, 5),   # stride=4: 需要更多上下文
+    'P3': (1, 2, 3),   # stride=8: 轻度扩大
+    'P4': (1, 1, 2),   # stride=16: 几乎不变
+    'P5': (1, 1, 1),   # stride=32: 标准
+}
+
+
+def insert_arf_heads(model_yaml_dict, arf_configs=ARF_CONFIGS):
+    """
+    在模型 YAML 配置的每个检测层之前插入 ARF 模块。
+    
+    解析 head 部分，找到 Detect 层引用的各层索引（即 P2/P3/P4/P5 的特征层），
+    在这些层之后、Detect 之前插入对应的 ARF 模块。
+    
+    由于 YOLO26 的 Detect 层是 `[[16, 19, 22], 1, Detect, [nc]]`，
+    我们需要在索引 16, 19, 22 之后各插入一个 ARF。
+    
+    Args:
+        model_yaml_dict: 已解析的模型配置字典
+        arf_configs: 各检测层对应的空洞率配置
+    
+    Returns:
+        修改后的模型配置字典
+    """
+    import copy
+    result = copy.deepcopy(model_yaml_dict)
+    head = result['head']
+    
+    # 找到 Detect 层的索引
+    detect_idx = None
+    detect_entry = None
+    for i, entry in enumerate(head):
+        if entry[-1] == 'Detect' or (isinstance(entry, list) and len(entry) >= 2 and entry[1] == 'Detect'):
+            detect_idx = i
+            detect_entry = head[i]
+            break
+    
+    if detect_entry is None:
+        raise ValueError("Cannot find Detect layer in head config")
+    
+    # Detect 层引用的特征层索引
+    detect_from = detect_entry[0]  # e.g. [16, 19, 22] or [19, 22, 25, 28]
+    
+    # 按照从 P2 到 P5 的顺序分配配置
+    layer_names = ['P2', 'P3', 'P4', 'P5'] if len(detect_from) == 4 else ['P3', 'P4', 'P5']
+    
+    # 为每个检测层插入 ARF
+    for i, (layer_idx, layer_name) in enumerate(zip(detect_from, layer_names)):
+        dilations = arf_configs[layer_name]
+        ch = head[layer_idx][3][0]  # 该层 C3k2 的输出通道数
+        # 在该层之后插入 ARF
+        # 策略：增加一层 ARF，from = [layer_idx], 1, ARF, [ch, dilations]
+        pass
+    
+    return result
 ```
 
-### ECA 插入位置
+### 模型配置 (`yolo26s_p2_arf.yaml`)
+
+基于 `yolo26s-p2.yaml` 的 head 部分，在各检测层前插入 ARF 模块：
+
+```yaml
+# models/yolo26s_p2_arf.yaml
+# 基于 yolo26s-p2.yaml，在 head 尾部检测层前插入 ARF 模块
+
+nc: 5
+end2end: True
+reg_max: 1
+scales:
+  n: [0.50, 0.25, 1024]
+  s: [0.50, 0.50, 1024]
+  m: [0.50, 1.00, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.50, 512]
+
+# Backbone (同 yolo26s-p2.yaml, 不变)
+backbone:
+  - [-1, 1, Conv, [64, 3, 2]]
+  - [-1, 1, Conv, [128, 3, 2]]
+  - [-1, 2, C3k2, [256, False, 0.25]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [-1, 2, C3k2, [512, False, 0.25]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [-1, 2, C3k2, [512, True]]
+  - [-1, 1, Conv, [1024, 3, 2]]
+  - [-1, 2, C3k2, [1024, True]]
+  - [-1, 1, SPPF, [1024, 5, 3, True]]
+  - [-1, 2, C2PSA, [1024]]
+
+# Head (同 yolo26s-p2.yaml + ARF 模块)
+head:
+  # FPN 自顶向下
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 6], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, True]]
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 4], 1, Concat, [1]]
+  - [-1, 2, C3k2, [256, True]]
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 2], 1, Concat, [1]]
+  - [-1, 2, C3k2, [128, True]]       # 19: P2 特征
+  
+  # PAN 自底向上
+  - [-1, 1, Conv, [128, 3, 2]]
+  - [[-1, 16], 1, Concat, [1]]
+  - [-1, 2, C3k2, [256, True]]       # 22: P3 特征
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 13], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, True]]       # 25: P4 特征
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 10], 1, Concat, [1]]
+  - [-1, 1, C3k2, [1024, True, 0.5, True]]  # 28: P5 特征
+  
+  # ARF 模块 (新增) + 检测层
+  - [[19], 1, ARF, [128, [1, 3, 5]]]   # 29: ARF-P2
+  - [[22], 1, ARF, [256, [1, 2, 3]]]   # 30: ARF-P3
+  - [[25], 1, ARF, [512, [1, 1, 2]]]   # 31: ARF-P4
+  - [[28], 1, ARF, [1024, [1, 1, 1]]]  # 32: ARF-P5
+  
+  - [[29, 30, 31, 32], 1, Detect, [nc]]
+```
+
+### 模型构建工具
 
 ```python
 # models/model_builder.py
-def insert_eca(model, positions='detect_before'):
-    """
-    在 YOLOv8 Neck 中插入 ECA 模块
-    
-    策略：在每个检测层 (P2/P3/P4/P5) 的最后一个 C2f 之后插入 ECA，
-    让网络在输出预测之前做最后的通道重要性校准。
-    
-    可扩展为在每个 C2f 后插入（需对比实验验证最优策略）
-    """
-    ...
+import torch.nn as nn
+from pathlib import Path
+from ultralytics.nn.tasks import DetectionModel
+from models.arf_head import ARF, ARF_CONFIGS
 
-# 伪代码：遍历 model.model 的 layer 列表
-# 找到 Detect 层前的 4 个 C2f，各插入一个 ECA(ch) 和对应的 Conv 适配
-# 用 nn.Sequential 包装 C2f + ECA
+# 注册自定义模块到 ultralytics
+# ultralytics 在解析 yaml 时会动态查找模块，需要在 ultralytics.nn.modules 中注册
+import ultralytics.nn.modules as ult_nn
+ult_nn.ARF = ARF  # 注册 ARF 模块
+
+
+def create_model(cfg_path, nc=5):
+    """
+    加载自定义模型配置并构建模型。
+    
+    Args:
+        cfg_path: yaml 配置文件路径 (如 'models/yolo26s_p2_arf.yaml')
+        nc: 类别数
+    
+    Returns:
+        DetectionModel 实例
+    """
+    # 读取 yaml 并覆盖 nc
+    import yaml
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f)
+    cfg['nc'] = nc
+    
+    # 使用 DetectionModel 构建
+    model = DetectionModel(cfg, ch=3, nc=nc)
+    return model
 ```
 
 ### 验证标准
-- [ ] ECA 模块正向/反向传播正确（梯度测试）
-- [ ] P2+ECA 模型的 mAP@0.5 和 AP_S 均不低于 Stage 2（ECA 至少无害）
-- [ ] 理想情况：AP_S 再提升 1-2%
-- [ ] 参数量增量 < 0.01M（ECA 极轻量）
+- [ ] ARF 模块正向/反向传播测试通过
+- [ ] 自定义 yaml 可被 ultralytics 正确加载（不报错）
+- [ ] 训练收敛正常
+- [ ] AP_S 相比 Stage 2 提升 ≥ 2%
+- [ ] 参数量增量 < 0.2M
 
 ---
 
-## Stage 4: Copy-Paste 数据增强
+## Stage 4: BCEM — 双向上下文增强模块 ⭐ 原创
 
-**改进原理**：小目标检测的核心瓶颈之一是**正样本数量不足**。TT100K 中每张图的小标志数量有限，且分布可能不均匀。Copy-Paste 增强将不同图中的小目标实例"粘贴"到其他图的合理位置，人工增加每张图的小目标密度，让模型在训练中看到更多样化的小目标-背景组合，尤其对小众类别（如 `p10` 禁止行人通行）的样本数有显著补充作用。
+**改进原理**：PANet 的跳跃连接直接将 Backbone 浅层特征拼接到 Neck，但这些浅层特征包含大量与前景目标无关的背景纹理。小目标（如交通标志）极易与道路标志线、文字、建筑边缘等背景元素混淆。BCEM 在跳跃连接处进行双向（通道 + 空间）的上下文增强，显式抑制背景、增强前景。
 
 ### 工作内容
 
 | 序号 | 任务 | 产出 |
 |------|------|------|
-| 4.1 | 实现 Copy-Paste 核心逻辑 ([augment/copy_paste.py](augment/copy_paste.py)) | 可复用增强模块 |
-| 4.2 | 集成到训练流程：通过 `albumentations` 自定义 transform 或训练 loop 中回调 | 训练钩子 |
-| 4.3 | 编写可视化脚本：抽查增强后的图片，验证粘贴位置合理、标签正确 | 质量检查 |
-| 4.4 | 训练 P2+ECA+CopyPaste 模型 | `experiments/stage4_copypaste/` |
-| 4.5 | 对比 Stage 3：验证泛化能力提升（train/val mAP gap 收窄） | 对比报告 |
+| 4.1 | 实现 BCEM 模块 (`models/bcem.py`) | 可复用的 BCEM 模块 |
+| 4.2 | 编写 `models/yolo26s_p2_arf_bcem.yaml`：在 Backbone→Neck 跳跃连接前插入 BCEM | 模型配置 |
+| 4.3 | 编写 `configs/stage4_bcem.yaml` | 训练配置 |
+| 4.4 | 训练 + 对比 Stage 3 | 对比报告 |
 
-### Copy-Paste 实现细节
+### BCEM 模块实现
 
 ```python
-# augment/copy_paste.py
-import random
-import cv2
-import numpy as np
+# models/bcem.py
+import torch
+import torch.nn as nn
+import math
 
-class CopyPasteAugmentation:
-    """
-    小目标 Copy-Paste 增强
-    
-    算法流程：
-    1. 随机选择一个 batch 中的源图像和目标图像
-    2. 从源图像中随机选取小目标框（面积 < threshold）
-    3. 提取目标像素（mask 或 bbox crop）
-    4. 随机缩放 (0.8~1.2x) 和轻微旋转 (±10°)
-    5. 粘贴到目标图像的空旷位置：
-       - 用目标图像现有 bbox 的 IoU 判断是否"空旷"
-       - 候选位置尝试 N 次，找 IoU < max_iou 的位置
-    6. 更新目标图像的标签列表
-    """
-    
-    def __init__(self, p=0.5, scale_range=(0.8, 1.2), max_iou=0.1, 
-                 max_attempts=20, small_area_thresh=32*32):
-        self.p = p
-        self.scale_range = scale_range
-        self.max_iou = max_iou
-        self.max_attempts = max_attempts
-        self.small_area_thresh = small_area_thresh
 
-    def __call__(self, image, bboxes, all_images, all_bboxes):
+class BCEM(nn.Module):
+    """
+    Bi-directional Context Enhancement Module (BCEM)
+    
+    在 Backbone → Neck 的跳跃连接处进行通道 + 空间双向上下文增强。
+    - 通道分支：通过 1D 卷积捕获局部跨通道交互（类似 ECA，但核更大）
+    - 空间分支：通过 7×7 大核深度卷积进行前景/背景判别
+    - 双分支乘法融合：确保两个维度双重确认才增强
+    - 残差连接：Output = Input + Input × ChAttn × SpAttn
+    
+    Args:
+        channels: 输入通道数
+        k_size: 1D 卷积核大小（None 则自适应计算）
+        gamma, b: 自适应核大小的参数
+    """
+    
+    def __init__(self, channels, k_size=None, gamma=2, b=1):
+        super().__init__()
+        
+        # 自适应 1D 卷积核大小
+        if k_size is None:
+            t = int(abs((math.log2(channels) / gamma) + (b / gamma)))
+            k_size = t if t % 2 == 1 else t + 1
+            k_size = max(3, k_size)  # 至少 3
+        
+        # 通道分支：1D 卷积实现局部跨通道交互
+        self.channel_branch = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),              # (B, C, 1, 1)
+            nn.Conv1d(1, 1, k_size, padding=k_size//2, bias=False),  # 1D 跨通道扫描
+            nn.Sigmoid(),
+        )
+        
+        # 空间分支：7×7 大核深度卷积 + 1×1 pointwise
+        self.spatial_branch = nn.Sequential(
+            nn.Conv2d(channels, channels, 1, bias=False),  # pointwise 压缩
+            nn.BatchNorm2d(channels),
+            nn.Conv2d(channels, channels, 7, padding=3, groups=channels, bias=False),  # 大核 depthwise
+            nn.BatchNorm2d(channels),
+            nn.Conv2d(channels, 1, 1, bias=False),         # 空间注意力图 (B, 1, H, W)
+            nn.Sigmoid(),
+        )
+        
+        # 初始化：初始时 BCEM 输出接近恒等映射
+        nn.init.constant_(self.spatial_branch[-1].weight, 0.0)
+    
+    def forward(self, x):
+        # 通道注意力
+        b, c, h, w = x.shape
+        ca = self.channel_branch(x)                # (B, C, 1, 1)
+        
+        # 空间注意力
+        sa = self.spatial_branch(x)                 # (B, 1, H, W)
+        
+        # 乘法融合 + 残差连接
+        # ca 和 sa 通过广播相乘 → (B, C, H, W)
+        enhanced = x * ca * sa
+        return x + enhanced
+
+
+# 注册到 ultralytics
+# from ultralytics.nn import modules as ult_nn
+# ult_nn.BCEM = BCEM
+```
+
+### 插入位置
+
+BCEM 模块插入在 Backbone 各层输出到 Neck 跳跃连接之间。具体来说，在 `yolo26s_p2_arf.yaml` 的 head 部分，每个 `Concat` 从 Backbone 引入特征之前，对 Backbone 特征先过 BCEM：
+
+```yaml
+# models/yolo26s_p2_arf_bcem.yaml 的关键改动
+head:
+  # ... 前半部分不变 ...
+  
+  # FPN 阶段：对每个从 Backbone 拼接的特征先做 BCEM
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[6], 1, BCEM, [512]]           # ← 新增: backbone P4 特征过 BCEM
+  - [[-2, -1], 1, Concat, [1]]      # 拼接 BCEM 增强后的特征
+  - [-1, 2, C3k2, [512, True]]
+  
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[4], 1, BCEM, [256]]           # ← 新增: backbone P3 特征过 BCEM
+  - [[-2, -1], 1, Concat, [1]]
+  - [-1, 2, C3k2, [256, True]]
+  
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[2], 1, BCEM, [128]]           # ← 新增: backbone P2 特征过 BCEM
+  - [[-2, -1], 1, Concat, [1]]
+  - [-1, 2, C3k2, [128, True]]
+  
+  # ... PAN 路径和 ARF 模块保持不变 ...
+```
+
+### 与 BCEM 配合的注意事项
+- 由于 ultralytics 的 yaml 解析限制，BCEM 的插入可能需要在 `model_builder.py` 中通过代码方式实现
+- 备选方案：直接在构建后的 `model.model` 上遍历和 wrap 特定层
+- 通道数需根据 scale (n/s/m/l/x) 动态匹配
+
+### 验证标准
+- [ ] BCEM 模块正向/反向传播测试通过（梯度不消失）
+- [ ] 插入 BCEM 后模型加载不报错
+- [ ] 训练收敛，损失下降正常
+- [ ] mAP@0.5 相比 Stage 3 提升 ≥ 1.5%
+- [ ] AP_S 提升 ≥ 2%，证明上下文增强对小目标有效
+
+---
+
+## Stage 5: HJ-Loss — 分层联合损失函数 ⭐ 原创
+
+**改进原理**：
+- IoU Loss 对小目标的位置偏移极度敏感 → 需要尺度鲁棒的定位监督
+- NWD（Normalized Wasserstein Distance）将 bbox 建模为高斯分布，对尺度不敏感，特别适合小目标
+- Wise-IoU v3 通过动态聚焦机制自动关注中等质量样本
+- **关键创新**：不同检测层使用不同的损失组合 —— P2/P3（小目标层）使用 WIoUv3 + NWD 联合监督，P4/P5 仅使用 WIoUv3
+
+### 工作内容
+
+| 序号 | 任务 | 产出 |
+|------|------|------|
+| 5.1 | 实现 WIoU v3 Loss (`models/hj_loss.py` 中的 `WIoUv3Loss`) | WIoU v3 损失模块 |
+| 5.2 | 实现 NWD Loss (`models/hj_loss.py` 中的 `NWDLoss`) | NWD 损失模块 |
+| 5.3 | 实现 HJ-Loss 调度器：管理不同层的损失分配和权重 | 分层损失调度器 |
+| 5.4 | 修改训练流程：通过回调或自定义 loss 注入 HJ-Loss | 训练集成 |
+| 5.5 | 编写 `configs/stage5_hjloss.yaml` | 训练配置 |
+| 5.6 | 训练 + 对比 Stage 4 | 对比报告 |
+
+### HJ-Loss 实现
+
+```python
+# models/hj_loss.py
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+
+
+class WIoUv3Loss(nn.Module):
+    """
+    Wise-IoU v3: 动态非单调聚焦机制
+    
+    相比 CIoU, WIoUv3 通过离群度 β 动态调整梯度增益，
+    自动关注中等质量的 anchor，抑制极端离群样本。
+    
+    公式:
+      L_WIoUv3 = r * R_WIoU * L_IoU
+      其中:
+        R_WIoU = exp((x-x_gt)²+(y-y_gt)²/(Wg²+Hg²))  # 惩罚框中心距离
+        r = β / (δ * α^(β-δ))                          # 动态梯度增益
+        β = L_IoU* / L_IoU_mean                         # 离群度 (detach)
+    
+    Reference: Tong et al., "Wise-IoU: Bounding Box Regression Loss with Dynamic Focusing", 2023
+    """
+    
+    def __init__(self, momentum=0.99, delta=2.0):
+        super().__init__()
+        self.momentum = momentum
+        self.delta = delta
+        self.register_buffer('running_mean', torch.tensor(1.0))
+    
+    def forward(self, pred_boxes, gt_boxes):
         """
         Args:
-            image: np.ndarray (H, W, 3) 目标图像
-            bboxes: np.ndarray (N, 5) [cls, x1, y1, x2, y2] 绝对坐标
-            all_images: list of np.ndarray — batch 中所有图像
-            all_bboxes: list of np.ndarray — batch 中所有图像的框
-        
+            pred_boxes: (N, 4) [cx, cy, w, h] normalized
+            gt_boxes:   (N, 4) [cx, cy, w, h] normalized
         Returns:
-            image_aug, bboxes_aug
+            loss: scalar
         """
-        if random.random() > self.p or len(all_images) < 2:
-            return image, bboxes
-
-        h, w = image.shape[:2]
+        # 计算 IoU
+        px1, py1, px2, py2 = self._xywh_to_xyxy(pred_boxes)
+        gx1, gy1, gx2, gy2 = self._xywh_to_xyxy(gt_boxes)
         
-        # 选源图像（与目标图像不同 & 有足够小目标）
-        candidates = [
-            (img, bb) for img, bb in zip(all_images, all_bboxes)
-            if id(img) != id(image) and len(bb) > 0
-        ]
-        if not candidates:
-            return image, bboxes
+        inter_w = (torch.min(px2, gx2) - torch.max(px1, gx1)).clamp(min=0)
+        inter_h = (torch.min(py2, gy2) - torch.max(py1, gy1)).clamp(min=0)
+        inter = inter_w * inter_h
         
-        src_img, src_bboxes = random.choice(candidates)
+        area_p = (px2 - px1) * (py2 - py1)
+        area_g = (gx2 - gx1) * (gy2 - gy1)
+        union = area_p + area_g - inter + 1e-7
+        iou = inter / union
         
-        # 从源图像中筛选小目标
-        src_h, src_w = src_img.shape[:2]
-        small_bboxes = []
-        for bb in src_bboxes:
-            x1, y1, x2, y2 = bb[1:]
-            area = (x2 - x1) * (y2 - y1)
-            if area < self.small_area_thresh:
-                small_bboxes.append(bb)
+        # R_WIoU: 惩罚中心点距离
+        px_c, py_c = (px1 + px2) / 2, (py1 + py2) / 2
+        gx_c, gy_c = (gx1 + gx2) / 2, (gy1 + gy2) / 2
+        wg, hg = gx2 - gx1, gy2 - gy1
+        r_wioU = torch.exp(
+            ((px_c - gx_c) ** 2 + (py_c - gy_c) ** 2) / 
+            ((wg ** 2 + hg ** 2) + 1e-7)
+        )
         
-        if not small_bboxes:
-            return image, bboxes
-
-        # 随机选 N 个小目标粘贴 (1~3 个)
-        num_paste = min(random.randint(1, 3), len(small_bboxes))
-        selected = random.sample(small_bboxes, num_paste)
+        # 基础损失
+        L_iou = 1.0 - iou
         
-        new_bboxes = list(bboxes)
+        # 动态聚焦因子: r = β / (δ * α^(β-δ))
+        # β = L_iou / L_iou_mean (离群度)
+        with torch.no_grad():
+            beta = L_iou.detach() / (self.running_mean + 1e-7)
         
-        for bb in selected:
-            cls_id = int(bb[0])
-            x1, y1, x2, y2 = bb[1:].astype(int)
-            crop = src_img[y1:y2, x1:x2].copy()
-            
-            # 随机缩放
-            scale = random.uniform(*self.scale_range)
-            new_h, new_w = int((y2 - y1) * scale), int((x2 - x1) * scale)
-            if new_h < 5 or new_w < 5:
-                continue
-            crop_resized = cv2.resize(crop, (new_w, new_h))
-            
-            # 找粘贴位置
-            pasted = False
-            for _ in range(self.max_attempts):
-                px = random.randint(0, max(0, w - new_w))
-                py = random.randint(0, max(0, h - new_h))
-                
-                paste_box = np.array([px, py, px + new_w, py + new_h])
-                
-                # 检查与现有框的 IoU
-                has_overlap = False
-                for existing in new_bboxes:
-                    existing_box = existing[1:5]
-                    iou = self._compute_iou(paste_box, existing_box)
-                    if iou > self.max_iou:
-                        has_overlap = True
-                        break
-                
-                if not has_overlap:
-                    # 简单的直接粘贴（也可用 Poisson blending 让边缘更自然）
-                    image[py:py + new_h, px:px + new_w] = crop_resized
-                    new_bboxes.append(np.array([cls_id, px, py, px + new_w, py + new_h]))
-                    pasted = True
-                    break
-            
-        return image, np.array(new_bboxes)
-    
-    def _compute_iou(self, box1, box2):
-        """计算两个 bbox 的 IoU"""
-        x1 = max(box1[0], box2[0])
-        y1 = max(box1[1], box2[1])
-        x2 = min(box1[2], box2[2])
-        y2 = min(box1[3], box2[3])
-        inter = max(0, x2 - x1) * max(0, y2 - y1)
-        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
-        return inter / (area1 + area2 - inter + 1e-6)
-```
-
-### 集成到训练流程
-
-```python
-# 方案 A: 通过自定义 DataLoader collate_fn 在 batch 组装时做 Copy-Paste
-# 优点: 不侵入 ultralytics 代码
-# 缺点: 需要控制变量，确保其他增强不冲突
-
-# 方案 B: 改造 ultralytics 的 BaseDataset.__getitem__
-# 优点: 与 mosaic/mixup 等增强在同一 pipeline 中
-# 缺点: 需要了解 ultralytics 内部实现
-
-# 推荐方案 A 起步，方案 B 作为优化
-```
-
-### 验证标准
-- [ ] 增强后图片质量检查：粘贴痕迹不突兀，坐标无越界
-- [ ] 训练过程中，每个 batch 平均小目标数量显著增加
-- [ ] val mAP 不低于 Stage 3（增强不应降低验证精度）
-- [ ] 过拟合程度降低（train/val gap 缩小）
-- [ ] 对小众类别（`io`, `p10`）的 AP 提升明显
-
----
-
-## Stage 5: Soft-NMS 后处理
-
-**改进原理**：标准 NMS 对重叠度高的低分框直接置零，这在**密集小目标场景**下容易误杀真阳性。例如两个交通标志在图像中距离很近时，标准 NMS 可能只保留一个。Soft-NMS 采用"惩罚而非删除"策略：当两个框 IoU 高时，降低低分框的置信度（用高斯衰减函数），而不是直接去掉。这样密集排列的小目标有更多机会被保留下来。
-
-### 工作内容
-
-| 序号 | 任务 | 产出 |
-|------|------|------|
-| 5.1 | 实现 Soft-NMS ([utils/soft_nms.py](utils/soft_nms.py))：支持 linear 和 gaussian 两种衰减 | 可复用 NMS 模块 |
-| 5.2 | 在 [scripts/detect.py](scripts/detect.py) 中替换默认 NMS 为 Soft-NMS | 推理脚本改进 |
-| 5.3 | 在 [scripts/eval.py](scripts/eval.py) 中支持 Soft-NMS 评估（val set 上跑） | 评估脚本改进 |
-| 5.4 | Grid Search Soft-NMS 的超参数（σ, score_threshold） | 超参数调优 |
-| 5.5 | 对比 Stage 4 + Soft-NMS vs Stage 4 + 标准 NMS | 对比报告 |
-
-### Soft-NMS 实现
-
-```python
-# utils/soft_nms.py
-import torch
-import numpy as np
-
-def soft_nms(boxes, scores, iou_threshold=0.5, sigma=0.5, 
-             score_threshold=0.001, method='gaussian'):
-    """
-    Soft-NMS 实现
-    
-    Args:
-        boxes: (N, 4) tensor [x1, y1, x2, y2]
-        scores: (N,) tensor — 置信度
-        iou_threshold: IoU 阈值
-        sigma: 高斯衰减的 sigma 参数
-        score_threshold: 最低分数阈值，低于此值的框直接丢弃
-        method: 'linear' | 'gaussian'
-    
-    Returns:
-        keep_indices: 保留的框索引
-    
-    算法 (对每个类别独立执行):
-    1. 按 scores 降序排列
-    2. 取最高分框 M
-    3. 对剩余框 b_i 计算 IoU(M, b_i)
-    4. 如果 method=='linear':
-         score_i = score_i * (1 - IoU)    if IoU > threshold
-    5. 如果 method=='gaussian':
-         score_i = score_i * exp(-IoU^2 / sigma)
-    6. 移除 score_i < score_threshold 的框
-    7. 重复 2-6 直到所有框处理完
-    """
-    if boxes.numel() == 0:
-        return torch.zeros(0, dtype=torch.long, device=boxes.device)
-    
-    # 转成左上+右下格式
-    x1 = boxes[:, 0]
-    y1 = boxes[:, 1]
-    x2 = boxes[:, 2]
-    y2 = boxes[:, 3]
-    areas = (x2 - x1) * (y2 - y1)
-    
-    _, order = scores.sort(descending=True)
-    keep = []
-    
-    while order.numel() > 0:
-        idx = order[0].item()
-        keep.append(idx)
+        r = beta / (self.delta * torch.pow(1.0, beta - self.delta))
         
-        if order.numel() == 1:
-            break
-        
-        # 计算当前最高分框与剩余框的 IoU
-        xx1 = torch.max(x1[idx], x1[order[1:]])
-        yy1 = torch.max(y1[idx], y1[order[1:]])
-        xx2 = torch.min(x2[idx], x2[order[1:]])
-        yy2 = torch.min(y2[idx], y2[order[1:]])
-        
-        w = torch.clamp(xx2 - xx1, min=0.0)
-        h = torch.clamp(yy2 - yy1, min=0.0)
-        inter = w * h
-        iou = inter / (areas[idx] + areas[order[1:]] - inter)
-        
-        # Soft-NMS 分数衰减
-        if method == 'linear':
-            weight = torch.where(
-                iou > iou_threshold, 
-                1.0 - iou,
-                torch.ones_like(iou)
+        # 更新 running mean (仅在训练时)
+        if self.training:
+            self.running_mean = (
+                self.momentum * self.running_mean + 
+                (1 - self.momentum) * L_iou.detach().mean()
             )
-        elif method == 'gaussian':
-            weight = torch.exp(-(iou * iou) / sigma)
-        else:
-            raise ValueError(f"Unknown method: {method}")
         
-        scores[order[1:]] *= weight
-        
-        # 过滤低分框
-        keep_mask = scores[order[1:]] > score_threshold
-        order = order[1:][keep_mask]
-        
-        # 重新排序（因为分数变了）
-        _, order = scores[order].sort(descending=True)
+        loss = (r.detach() * r_wioU * L_iou).mean()
+        return loss
     
-    return torch.tensor(keep, dtype=torch.long, device=boxes.device)
+    @staticmethod
+    def _xywh_to_xyxy(boxes):
+        cx, cy, w, h = boxes.chunk(4, dim=-1)
+        x1 = cx - w / 2
+        y1 = cy - h / 2
+        x2 = cx + w / 2
+        y2 = cy + h / 2
+        return x1, y1, x2, y2
 
 
-def batched_soft_nms(predictions, iou_threshold=0.5, sigma=0.5, 
-                     score_threshold=0.001, method='gaussian'):
+class NWDLoss(nn.Module):
     """
-    对 ultralytics 的预测结果做 Soft-NMS
+    Normalized Wasserstein Distance Loss
     
-    Args:
-        predictions: ultralytics Results 对象的原始输出
+    将边界框建模为 2D 高斯分布，计算 Wasserstein 距离。
+    对小尺度偏移不敏感，专为小目标定位设计。
+    
+    公式:
+      NWD(N_a, N_b) = exp(-√W_2²(N_a, N_b) / C)
+      其中 C 是归一化常数（通常设为数据集平均目标尺寸）
+    
+    Reference: Wang et al., "A Normalized Gaussian Wasserstein Distance 
+               for Tiny Object Detection", 2021
+    """
+    
+    def __init__(self, c=12.0):
+        """
+        Args:
+            c: 归一化常数，与数据集平均目标尺寸相关
+               对于 TT100K，建议 c = 12.0 (匹配平均 16×16 小目标的 2D 高斯)
+        """
+        super().__init__()
+        self.c = c
+    
+    def forward(self, pred_boxes, gt_boxes):
+        """
+        Args:
+            pred_boxes: (N, 4) [cx, cy, w, h] normalized
+            gt_boxes:   (N, 4) [cx, cy, w, h] normalized
+        Returns:
+            loss: scalar
+        """
+        # 将 bbox 转换为 2D 高斯参数: (μ_x, μ_y, σ_w, σ_h)
+        # 高斯分布建模: μ = (cx, cy); Σ = diag(w²/4, h²/4)
+        pred_cx, pred_cy, pred_w, pred_h = pred_boxes.chunk(4, dim=-1)
+        gt_cx, gt_cy, gt_w, gt_h = gt_boxes.chunk(4, dim=-1)
+        
+        # Wasserstein 距离平方
+        # W_2² = ||μ_p - μ_g||² + ||σ_p - σ_g||_F²
+        mu_dist = (pred_cx - gt_cx) ** 2 + (pred_cy - gt_cy) ** 2
+        sigma_dist = (
+            ((pred_w - gt_w) / 2) ** 2 + 
+            ((pred_h - gt_h) / 2) ** 2
+        )
+        w2_sq = mu_dist + sigma_dist
+        
+        # 归一化
+        nwd = torch.exp(-torch.sqrt(w2_sq + 1e-7) / self.c)
+        
+        loss = (1.0 - nwd).mean()
+        return loss
+
+
+class HierarchicalJointLoss(nn.Module):
+    """
+    分层联合损失 (HJ-Loss)
+    
+    为不同检测层提供差异化的损失函数：
+    - P2/P3 (小目标): WIoUv3 + 0.3 * NWD
+    - P4/P5 (大目标): WIoUv3
+    
+    这种设计避免了 NWD 对大目标引入不必要的噪声。
+    """
+    
+    def __init__(self, nwd_weight=0.3, nwd_layers=['P2', 'P3'], c_nwd=12.0):
+        super().__init__()
+        self.wiouv3 = WIoUv3Loss()
+        self.nwd = NWDLoss(c=c_nwd)
+        self.nwd_weight = nwd_weight
+        self.nwd_layers = nwd_layers  # 使用 NWD 的检测层
+    
+    def forward(self, pred_boxes, gt_boxes, layer_name='P3'):
+        """
+        Args:
+            pred_boxes: 预测框
+            gt_boxes: 真实框
+            layer_name: 检测层标识 ('P2', 'P3', 'P4', 'P5')
+        """
+        loss_wiou = self.wiouv3(pred_boxes, gt_boxes)
+        
+        if layer_name in self.nwd_layers:
+            loss_nwd = self.nwd(pred_boxes, gt_boxes)
+            return loss_wiou + self.nwd_weight * loss_nwd
+        else:
+            return loss_wiou
+```
+
+### ultralytics 集成方案
+
+HJ-Loss 需要集成到训练流程中。ultralytics 的损失函数在 `ultralytics.utils.loss` 中定义。集成方案：
+
+```python
+# 方案：通过修改 ultralytics 的 v8DetectionLoss 来注入自定义损失
+# 在 models/hj_loss.py 中提供替换函数
+
+def apply_hj_loss(trainer):
+    """
+    在 ultralytics Trainer 中注入 HJ-Loss。
+    
+    通过 monkey-patch trainer.loss 来替换默认的 CIoU loss，
+    同时保留分类损失和 DFL (reg_max=1 时自动跳过 DFL)。
+    """
+    from models.hj_loss import HierarchicalJointLoss
+    
+    hj_loss = HierarchicalJointLoss()
+    original_loss_fn = trainer.loss
+    
+    def custom_loss(preds, batch):
+        # 调用原始损失获取分类部分
+        # 替换回归部分
         ...
     
-    Returns:
-        过滤后的预测结果
-    """
-    # 提取 boxes, scores, classes
-    # 按类别分组调用 soft_nms
-    # 合并结果
-    ...
-```
-
-### 超参数调优
-
-```python
-# 建议 Grid Search 范围
-sigma_candidates = [0.3, 0.5, 0.7, 0.9]
-iou_threshold_candidates = [0.45, 0.5, 0.55, 0.6]
-# 在 val set 上评估每种组合，选最优 mAP
+    return hj_loss
 ```
 
 ### 验证标准
-- [ ] Soft-NMS 输出格式与标准 NMS 兼容
-- [ ] 在密集小目标场景（多标志近距离排列），召回率提升
-- [ ] 推理速度下降 < 5%（Soft-NMS 的计算开销主要在 IoU 计算，增加有限）
-- [ ] 与标准 NMS 的 PR 曲线对比
+- [ ] WIoUv3 和 NWD 模块的数值正确性（与参考实现对比）
+- [ ] HJ-Loss 能正常训练（不 NaN，收敛）
+- [ ] AP_S 相比 Stage 4 提升 ≥ 3%
+- [ ] 高 IoU 阈值下（AP@0.75）的小目标精度提升显著（NWD 的优势）
 
 ---
 
 ## Stage 6: 系统集成、消融实验与交付
 
-**目标**：完成消融实验表格，输出最终模型，交付 Demo。
+**目标**：完成完整消融实验，输出最终模型，交付所有代码和文档。
 
 ### 工作内容
 
 | 序号 | 任务 | 产出 |
 |------|------|------|
-| 6.1 | 完整消融实验：逐一移除各改进点，量化每个模块的贡献 | `experiments/stage6_full/ablation.md` |
-| 6.2 | 编写可视化工具 ([utils/visualization.py](utils/visualization.py))：PR 曲线、检测结果对比、特征图可视化 | 可视化工具 |
-| 6.3 | 实现实时摄像头 Demo ([scripts/demo.py](scripts/demo.py))：支持 GPU 加速推理 | Demo 应用 |
-| 6.4 | 导出 ONNX / TensorRT（可选）用于部署验证 | 部署模型 |
-| 6.5 | 编写最终 README 和实验报告 | 文档 |
+| 6.1 | 完整消融实验：逐一移除各模块，量化贡献 | `experiments/stage6_full/ablation.md` |
+| 6.2 | 实现 Soft-NMS (`utils/soft_nms.py`) + 集成到推理 | 优化后的后处理 |
+| 6.3 | 多尺度 TTA（测试时增强）评估 | 最终精度指标 |
+| 6.4 | ONNX 导出验证 | 部署就绪模型 |
+| 6.5 | 实时摄像头 Demo | 演示应用 |
+| 6.6 | 更新 `docs/generate_report.py`，生成最终 Word 报告 | 竞赛报告 |
 
 ### 消融实验设计
 
-| 实验 | P2 | ECA | Copy-Paste | Soft-NMS | mAP@0.5 | mAP@0.5:0.95 | AP_S | FPS |
-|------|----|-----|------------|----------|---------|--------------|------|-----|
+| 实验 | P2 | ARF-Head | BCEM | HJ-Loss | mAP@0.5 | mAP@0.5:0.95 | AP_S | FPS |
+|:---:|:--:|:---:|:--:|:--:|:---:|:---:|:---:|:---:|
 | A (基线) | ✗ | ✗ | ✗ | ✗ | ? | ? | ? | ? |
 | B | ✓ | ✗ | ✗ | ✗ | ? | ? | ? | ? |
 | C | ✓ | ✓ | ✗ | ✗ | ? | ? | ? | ? |
 | D | ✓ | ✓ | ✓ | ✗ | ? | ? | ? | ? |
 | E (完整) | ✓ | ✓ | ✓ | ✓ | ? | ? | ? | ? |
 
-**消融分析**：
-- B - A = P2 层的贡献
-- C - B = ECA 的贡献
-- D - C = Copy-Paste 的贡献
-- E - D = Soft-NMS 的贡献
+**贡献分析**：
+- B - A = P2 检测层的净贡献
+- C - B = ARF-Head 的净贡献
+- D - C = BCEM 的净贡献
+- E - D = HJ-Loss 的净贡献
 
-### 可视化工具
-
-```python
-# utils/visualization.py
-def plot_detection_comparison(img, baseline_results, improved_results, save_path):
-    """
-    并排对比基线和改进模型的检测结果
-    - 用不同颜色标注两个模型的框
-    - FP/FN 差异可视化
-    """
-    ...
-
-def plot_pr_curves(metrics_dict, save_path):
-    """
-    绘制多个模型的 PR 曲线对比
-    - 每个类别一条线
-    - 小/中/大目标分开
-    """
-    ...
-
-def plot_feature_map(model, img, layer_names, save_path):
-    """
-    可视化特征图 — 查看 P2 检测层是否真的关注了小目标
-    """
-    ...
-```
-
-### Demo 应用
-
-```python
-# scripts/demo.py
-"""
-实时交通标志检测 Demo
-- 支持: 图片文件 / 视频文件 / 摄像头 / RTSP 流
-- 显示: 检测框 + 类别名 + 置信度 + FPS
-- 快捷键: q=退出, s=截图, p=暂停
-"""
-```
-
-### 验证标准
-- [ ] 消融实验表格完整，每个改进点的贡献量化
-- [ ] Demo 在摄像头输入下流畅运行（>30 FPS）
-- [ ] 异常场景处理：无目标帧、低光照、遮挡场景
-- [ ] 代码结构清晰，可复现训练
+### 可视化验证清单
+- [ ] PR 曲线对比（Baseline vs Stage 6）
+- [ ] 小目标热力图：BCEM 的显著性图可视化（证明 BCEM 确实增强了前景区域）
+- [ ] 错误分析：对比 Baseline 和 Full Model 的 FN/FP 案例
+- [ ] 推理速度 Benchmark（GPU + CPU）
 
 ---
 
 ## 关键技术风险与对策
 
-| 风险 | 影响 | 对策 |
-|------|------|------|
-| P2 层导致显存不够 (batch > 8 → 4 或更低) | 训练不稳定 | 使用 gradient accumulation 补偿；降低 imgsz 到 1024 |
-| ECA 无效果甚至掉点 | 白做 | 尝试其他 attention (CBAM, SE)；或仅在 P2/P3 层加 ECA |
-| Copy-Paste 粘贴位置不合理导致 FP 增多 | 精度下降 | 严格 IoU 限制；加入边缘区域排除 |
-| Soft-NMS 超参数敏感 | 效果不稳定 | 在 val 上充分 Grid Search；提供 fallback 回标准 NMS |
-| TT100K 数据下载/标注质量问题 | 数据不可用 | 标注清洗脚本；标注可视化检查 |
+| 风险 | 影响 | 概率 | 对策 |
+|------|------|:---:|------|
+| YOLO26s 预训练权重与自定义 head 不兼容 | ARF/BCEM 模块无预训练权重 | 中 | 仅 load backbone 预训练，head 部分随机初始化后 warmup |
+| ARF 模块在 yaml 中注册失败 | 模型无法构建 | 中 | 备选：用 model_builder.py 代码方式手动插入模块 |
+| BCEM 插入后维度不匹配 | 训练报错 | 低 | 编写自动化通道验证脚本；支持自适应通道适配 |
+| HJ-Loss 与 ultralytics 训练流程不兼容 | 无法使用标准 train() | 中 | 通过 callback hook 或 monkey-patch 注入；备选：自定义训练循环 |
+| P2 + ARF 导致显存不足（batch=8 → OOM） | 训练失败 | 中 | 降至 batch=4 + gradient_accumulation=2 |
+| ultralytics 版本升级导致 API 变动 | 代码不兼容 | 低 | 锁定 ultralytics==8.4.65 版本 |
 
 ---
 
-## 里程碑时间线（建议）
+## 里程碑时间线
 
 ```
-Week 1: Stage 1 (数据 + 基线) ───────────────  ████████
-Week 2: Stage 2 (P2) ───────────────────────── ████████
-Week 3: Stage 3 (ECA) + Stage 4 (CopyPaste) ──  ████░░░░ (并行实验)
-Week 4: Stage 5 (SoftNMS) + Stage 6 (集成) ───  ████████
+Phase 1 (2天):  Stage 1 — 数据 + 基线训练 + 基线评估
+Phase 2 (1天):  Stage 2 — YOLO26s-P2 官方 P2 变体
+Phase 3 (2天):  Stage 3 — ARF-Head 模块开发 + 训练 + 验证
+Phase 4 (2天):  Stage 4 — BCEM 模块开发 + 训练 + 验证
+Phase 5 (1天):  Stage 5 — HJ-Loss 实现 + 训练 + 验证
+Phase 6 (2天):  Stage 6 — 消融实验 + Demo + 报告
+───────────────────────────────────────────────────
+总计: 10 天
 ```
-
-P2 是最关键的改进（直接提升小目标特征分辨率），建议优先确保 P2 稳定后再叠加后续改进。ECA 和 Copy-Paste 可以并行实验（各自基于 Stage 2 分支），最后在 Stage 6 合并。
 
 ---
 
 ## 代码规范
 
-- 遵循现有项目风格（Python 3.12+, 类型标注）
-- 所有路径使用 `pathlib.Path`
-- 训练配置通过 yaml 文件管理，不硬编码
-- 每个 Stage 的训练产物放在独立目录下
-- 使用 `logging` 而非 `print`
-- 关键函数有 docstring 和类型标注
+- 所有新增模块在 `models/` 下，遵循现有项目的 docstring + 类型标注风格
+- 模块通过 `model_builder.py` 注册到 ultralytics，不直接修改 ultralytics 源码
+- 每个 Stage 的配置和产物独立管理，确保可复现
+- 训练配置通过 YAML 文件管理，与 `scripts/train.py` 兼容
+- 所有自定义 nn.Module 提供 `forward` 的显式 shape 注释

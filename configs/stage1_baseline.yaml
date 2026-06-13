@@ -1,27 +1,27 @@
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 2: YOLO26s-P2 (Official High-Resolution Detection Layer)
+# Stage 1: YOLO26s Baseline Training Configuration
 # ────────────────────────────────────────────────────────────────────────────
-# 使用官方 yolo26s-p2.yaml，增加 P2/4 检测层，提升小目标特征分辨率。
-# Batch 减半以容纳 P2 层约 25% 的 FLOPs 增长。
+# 使用官方 yolo26s.yaml，不做任何修改，建立性能基线。
 # ────────────────────────────────────────────────────────────────────────────
 
-model: "yolo26s-p2.yaml"           # Official YOLO26 small with P2 detection head
-pretrained: true
+# Model
+model: "yolo26s.yaml"            # Official YOLO26 small (ultralytics built-in)
+pretrained: true                  # Load COCO pretrained weights
 
 # Data
 data: "data/processed/dataset.yaml"
 imgsz: 640
 rect: false
 
-# Training (P2 adds ~25% FLOPs → reduce batch to fit VRAM)
+# Training
 epochs: 100
-batch: 8                          # Down from 16 for P2 overhead
+batch: 16
 workers: 8
-device: "0"
+device: "0"                       # CUDA GPU 0
 amp: false
 
 # Optimization
-optimizer: "auto"
+optimizer: "auto"                 # SGD for small models
 lr0: 0.01
 lrf: 0.01
 momentum: 0.937
@@ -54,7 +54,7 @@ iou: 0.7
 max_det: 300
 
 # Logging
-project: "experiments/stage2_p2"
+project: "experiments/stage1_baseline"
 name: "train"
 exist_ok: true
 val: true

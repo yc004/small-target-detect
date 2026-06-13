@@ -1,11 +1,11 @@
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 2: YOLO26s-P2 (Official High-Resolution Detection Layer)
+# Stage 3: YOLO26s-P2 + ARF-Head
 # ────────────────────────────────────────────────────────────────────────────
-# 使用官方 yolo26s-p2.yaml，增加 P2/4 检测层，提升小目标特征分辨率。
-# Batch 减半以容纳 P2 层约 25% 的 FLOPs 增长。
+# 在官方 P2 变体基础上，为每个检测层插入自适应感受野 (ARF) 模块。
+# ARF 通过多分支空洞卷积 + 可学习 softmax 融合，实现尺度感知的特征提取。
 # ────────────────────────────────────────────────────────────────────────────
 
-model: "yolo26s-p2.yaml"           # Official YOLO26 small with P2 detection head
+model: "models/yolo26s_p2_arf.yaml"  # Custom: P2 + ARF-Head
 pretrained: true
 
 # Data
@@ -13,9 +13,9 @@ data: "data/processed/dataset.yaml"
 imgsz: 640
 rect: false
 
-# Training (P2 adds ~25% FLOPs → reduce batch to fit VRAM)
+# Training (ARF adds minor overhead; keep batch=8 from Stage 2)
 epochs: 100
-batch: 8                          # Down from 16 for P2 overhead
+batch: 8
 workers: 8
 device: "0"
 amp: false
@@ -54,7 +54,7 @@ iou: 0.7
 max_det: 300
 
 # Logging
-project: "experiments/stage2_p2"
+project: "experiments/stage3_arf_head"
 name: "train"
 exist_ok: true
 val: true

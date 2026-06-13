@@ -1,11 +1,12 @@
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 2: YOLO26s-P2 (Official High-Resolution Detection Layer)
+# Stage 4: YOLO26s-P2 + ARF-Head + BCEM
 # ────────────────────────────────────────────────────────────────────────────
-# 使用官方 yolo26s-p2.yaml，增加 P2/4 检测层，提升小目标特征分辨率。
-# Batch 减半以容纳 P2 层约 25% 的 FLOPs 增长。
+# 在 Stage 3 基础上，在 Backbone → Neck 的跳跃连接处插入 BCEM 模块。
+# BCEM 对浅层 Backbone 特征进行通道+空间双向上下文增强，
+# 抑制背景噪声（道路标线、文字、建筑边缘），增强前景小目标。
 # ────────────────────────────────────────────────────────────────────────────
 
-model: "yolo26s-p2.yaml"           # Official YOLO26 small with P2 detection head
+model: "models/yolo26s_p2_arf_bcem.yaml"  # Custom: P2 + ARF + BCEM
 pretrained: true
 
 # Data
@@ -13,9 +14,9 @@ data: "data/processed/dataset.yaml"
 imgsz: 640
 rect: false
 
-# Training (P2 adds ~25% FLOPs → reduce batch to fit VRAM)
+# Training
 epochs: 100
-batch: 8                          # Down from 16 for P2 overhead
+batch: 8
 workers: 8
 device: "0"
 amp: false
@@ -54,7 +55,7 @@ iou: 0.7
 max_det: 300
 
 # Logging
-project: "experiments/stage2_p2"
+project: "experiments/stage4_bcem"
 name: "train"
 exist_ok: true
 val: true
