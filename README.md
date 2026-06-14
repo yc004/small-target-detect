@@ -1,6 +1,6 @@
 # Small Target Traffic Sign Detection
 
-基于改进 YOLOv8 的 TT100K 小目标交通标志实时检测。
+基于改进 YOLO26 的 TT100K 小目标交通标志实时检测。
 
 ## 项目概述
 
@@ -8,8 +8,9 @@
 |------|------|
 | 任务 | 小目标交通标志检测与识别 |
 | 数据集 | TT100K (2021) — 5 类交通标志 |
-| 基线模型 | YOLOv8s |
-| 改进点 | P2 检测层 → ECA 注意力 → Copy-Paste 增强 → Soft-NMS |
+| 基线模型 | YOLO26s (ultralytics 2025) |
+| 改进点 | P2 检测层 → ARF-Head → BCEM → HJ-Loss → Soft-NMS |
+| 原创模块 | ARF-Head / BCEM / HJ-Loss（三项原创设计） |
 | 框架 | PyTorch + Ultralytics |
 
 ### 5 类目标
@@ -50,7 +51,7 @@ pip install -r requirements.txt
 python data/prepare_dataset.py --data_dir /path/to/TT100K --output_dir data/processed
 
 # 3. 训练基线
-python scripts/train.py --config configs/baseline.yaml --device mps
+python scripts/train.py --config configs/stage1_baseline.yaml --device mps
 
 # 4. 评估
 python scripts/eval.py --weights experiments/stage1_baseline/train/weights/best.pt --data data/processed/dataset.yaml
@@ -84,16 +85,16 @@ small_target_detect/
 └── IMPLEMENTATION_PLAN.md       # 6 阶段渐进式实现方案
 ```
 
-## 渐进式改进路线
+## 渐进式改进路线（6 阶段）
 
-| Stage | 改进 | 预期提升 | 状态 |
-|-------|------|----------|------|
-| 1 | 基线 YOLOv8s | — | 🔄 |
-| 2 | + P2 高分辨率检测层 | AP_S +3~5% | ⬜ |
-| 3 | + ECA 通道注意力 | AP +1~2% | ⬜ |
-| 4 | + Copy-Paste 数据增强 | 泛化性 ↑ | ⬜ |
-| 5 | + Soft-NMS 后处理 | 密集场景召回 ↑ | ⬜ |
-| 6 | 消融实验 + 演示 | 完整报告 | ⬜ |
+| Stage | 改进 | 创新程度 | 预期提升 | 状态 |
+|-------|------|:---:|----------|------|
+| 1 | 基线 YOLO26s | — | 建立性能基线 | 🔄 |
+| 2 | + P2 高分辨率检测层 | 官方 | AP_S +5% | ⬜ |
+| 3 | + **ARF-Head** 自适应感受野检测头 | ⭐⭐⭐ 原创 | AP_S +2% | ⬜ |
+| 4 | + **BCEM** 双向上下文增强模块 | ⭐⭐⭐⭐ 原创 | AP_S +2%, mAP +1.5% | ⬜ |
+| 5 | + **HJ-Loss** 分层联合损失函数 | ⭐⭐⭐⭐ 原创 | AP_S +3% | ⬜ |
+| 6 | + Soft-NMS 后处理 + 系统集成 | 集成 | 密集场景召回 ↑ | ⬜ |
 
 详见 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)。
 

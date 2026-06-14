@@ -25,6 +25,18 @@ runs/
 .vscode/
 .idea/
 
+# LaTeX intermediate files
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.xdv
+
 data/Dataset-TT100K
 data/processed/dataset.yaml
 data/TT100K_raw
