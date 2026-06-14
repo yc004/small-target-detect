@@ -15,7 +15,7 @@ rect: false
 
 # Training
 epochs: 100
-batch: 16
+batch: 8
 workers: 8
 device: "0"                       # CUDA GPU 0
 amp: false

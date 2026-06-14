@@ -43,17 +43,9 @@ logger = logging.getLogger(__name__)
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
-# The 5 target classes from TT100K
-# Note: 'io' does not exist in TT100K; 'pne' (禁止驶入/no entry) is used instead
-TARGET_CLASSES = ["i2", "i4", "i5", "pne", "p10"]
-
-CLASS_NAMES = {
-    "i2": "speed_limit_5",
-    "i4": "speed_limit_30",
-    "i5": "speed_limit_40",
-    "pne": "no_entry",
-    "p10": "no_pedestrians",
-}
+# Set to None to auto-discover ALL classes from annotations.
+# Or specify a list like ["i2", "i4", "i5", "pne", "p10"] to filter.
+TARGET_CLASSES = None  # None = keep all classes found in annotations
 
 # Split ratios
 TRAIN_RATIO = 0.7
@@ -66,9 +58,37 @@ DEFAULT_IMG_SIZE = (2048, 2048)
 
 # ─── TT100K Annotation Parsing ──────────────────────────────────────────────
 
+def _build_class_mapping(
+    all_categories: set,
+    target_classes: Optional[List[str]],
+) -> Tuple[List[str], Dict[str, int], Dict[str, str]]:
+    """
+    Build class list, class_id mapping, and display names from discovered categories.
+
+    Args:
+        all_categories: Set of all unique category strings found in annotations.
+        target_classes: If provided, only keep these classes. If None, keep all.
+
+    Returns:
+        (class_list, cat_to_id, cat_to_display_name)
+        - class_list: ordered list of category strings (deterministic via sort)
+        - cat_to_id: {category_string: class_id}
+        - cat_to_display_name: {category_string: display_name}
+    """
+    if target_classes is not None:
+        filtered = sorted(target_classes)
+    else:
+        filtered = sorted(all_categories)
+
+    cat_to_id = {cat: i for i, cat in enumerate(filtered)}
+    cat_to_display = {cat: cat for cat in filtered}
+    return filtered, cat_to_id, cat_to_display
+
+
 def parse_tt100k_annotations(
     ann_path: Path,
-) -> Dict[str, List[Dict]]:
+    target_classes: Optional[List[str]] = None,
+) -> Tuple[Dict[str, List[Dict]], List[str], Dict[str, int], Dict[str, str]]:
     """
     Parse TT100K JSON annotation file. Supports three formats:
 
@@ -91,6 +111,13 @@ def parse_tt100k_annotations(
         "annotations": [{"image_id": 1, "category_id": 1, "bbox": [x,y,w,h]}],
         "images": [...], "categories": [...]
     }
+
+    Returns:
+        (annotations_dict, class_list, cat_to_id, cat_to_display_name)
+        - annotations_dict: {img_path: [ann_dict, ...]}
+        - class_list: ordered list of category strings
+        - cat_to_id: {category_string: class_id}
+        - cat_to_display_name: {category_string: display_name}
     """
     logger.info(f"Loading annotations from {ann_path}")
 
@@ -102,6 +129,7 @@ def parse_tt100k_annotations(
 
     # ── Detect format ────────────────────────────────────────────────────
     result: Dict[str, List[Dict]] = {}
+    all_categories: set = set()
 
     if imgs:
         # Check if objects are nested inside imgs (Format A)
@@ -112,21 +140,21 @@ def parse_tt100k_annotations(
                 img_path = img_info.get("path", f"{img_id}.jpg")
                 objects = img_info.get("objects", [])
 
-                filtered = []
+                kept = []
                 for obj in objects:
                     category = obj.get("category", "")
-                    if category in TARGET_CLASSES:
-                        bbox = obj["bbox"]
-                        filtered.append({
-                            "category": category,
-                            "class_id": TARGET_CLASSES.index(category),
-                            "bbox": [
-                                int(bbox["xmin"]), int(bbox["ymin"]),
-                                int(bbox["xmax"]), int(bbox["ymax"]),
-                            ],
-                        })
-                if filtered:
-                    result[img_path] = filtered
+                    all_categories.add(category)
+                    bbox = obj["bbox"]
+                    kept.append({
+                        "category": category,
+                        "class_id": -1,  # placeholder, filled after class mapping
+                        "bbox": [
+                            int(bbox["xmin"]), int(bbox["ymin"]),
+                            int(bbox["xmax"]), int(bbox["ymax"]),
+                        ],
+                    })
+                if kept:
+                    result[img_path] = kept
 
         elif anns:
             # Format B: imgs + anns separated
@@ -137,21 +165,21 @@ def parse_tt100k_annotations(
 
             for img_id, img_annotations in anns.items():
                 img_path = id_to_path.get(int(img_id), f"train/{img_id}.jpg")
-                filtered = []
+                kept = []
                 for ann in img_annotations:
                     category = ann.get("category", "")
-                    if category in TARGET_CLASSES:
-                        bbox = ann["bbox"]
-                        filtered.append({
-                            "category": category,
-                            "class_id": TARGET_CLASSES.index(category),
-                            "bbox": [
-                                int(bbox["xmin"]), int(bbox["ymin"]),
-                                int(bbox["xmax"]), int(bbox["ymax"]),
-                            ],
-                        })
-                if filtered:
-                    result[img_path] = filtered
+                    all_categories.add(category)
+                    bbox = ann["bbox"]
+                    kept.append({
+                        "category": category,
+                        "class_id": -1,  # placeholder
+                        "bbox": [
+                            int(bbox["xmin"]), int(bbox["ymin"]),
+                            int(bbox["xmax"]), int(bbox["ymax"]),
+                        ],
+                    })
+                if kept:
+                    result[img_path] = kept
         else:
             logger.warning("  imgs dict found but no 'objects' or 'anns' key")
 
@@ -163,21 +191,14 @@ def parse_tt100k_annotations(
             name = cat.get("name", cat.get("category", ""))
             cat_id_to_name[cat["id"]] = name
 
-        target_ids = set()
-        for cls in TARGET_CLASSES:
-            for cid, cname in cat_id_to_name.items():
-                if cname == cls:
-                    target_ids.add(cid)
-
         img_id_to_name = {}
         for img in data.get("images", []):
             img_id_to_name[img["id"]] = img.get("file_name", f"{img['id']:06d}.jpg")
 
         for ann in data["annotations"]:
             cat_id = ann.get("category_id", -1)
-            if cat_id not in target_ids:
-                continue
             cat_name = cat_id_to_name.get(cat_id, "unknown")
+            all_categories.add(cat_name)
             bbox = ann["bbox"]
             file_name = img_id_to_name.get(ann["image_id"], f"{ann['image_id']:06d}.jpg")
 
@@ -185,18 +206,42 @@ def parse_tt100k_annotations(
                 result[file_name] = []
             result[file_name].append({
                 "category": cat_name,
-                "class_id": TARGET_CLASSES.index(cat_name) if cat_name in TARGET_CLASSES else 0,
+                "class_id": -1,  # placeholder
                 "bbox": [
                     int(bbox[0]), int(bbox[1]),
                     int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3]),
                 ],
             })
 
+    # ── Build class mapping ──────────────────────────────────────────────
+    class_list, cat_to_id, cat_to_display = _build_class_mapping(
+        all_categories, target_classes
+    )
+
+    # ── Assign class IDs ─────────────────────────────────────────────────
+    for img_path, anns in result.items():
+        filtered = []
+        for ann in anns:
+            cat = ann["category"]
+            if cat in cat_to_id:
+                ann["class_id"] = cat_to_id[cat]
+                filtered.append(ann)
+        if filtered:
+            result[img_path] = filtered
+        else:
+            # No annotations match target classes — remove this image
+            del result[img_path]  # noqa: safe-deletion in loop-over-keys context
+            # Actually we need to be careful modifying while iterating.
+            # We'll handle this after the loop.
+
+    # Re-filter: remove images with zero matching annotations
+    result = {k: v for k, v in result.items() if len(v) > 0}
+
     logger.info(
         f"Found {len(result)} images with {sum(len(v) for v in result.values())} "
-        f"annotations across {len(TARGET_CLASSES)} classes"
+        f"annotations across {len(class_list)} classes"
     )
-    return result
+    return result, class_list, cat_to_id, cat_to_display
 
 
 # ─── YOLO Format Conversion ─────────────────────────────────────────────────
@@ -309,6 +354,7 @@ def generate_dataset_yaml(
     test_path: str,
     nc: int = 5,
     names: Optional[List[str]] = None,
+    class_list: Optional[List[str]] = None,
 ) -> None:
     """
     Generate ultralytics dataset.yaml configuration.
@@ -319,10 +365,14 @@ def generate_dataset_yaml(
         val_path: Path to val images dir.
         test_path: Path to test images dir.
         nc: Number of classes.
-        names: List of class display names.
+        names: List of class display names (deprecated; use class_list).
+        class_list: Ordered list of category strings (used if names is None).
     """
     if names is None:
-        names = [CLASS_NAMES.get(c, c) for c in TARGET_CLASSES]
+        if class_list is not None:
+            names = list(class_list)
+        else:
+            names = [f"class_{i}" for i in range(nc)]
 
     config = {
         "path": str(output_path.parent.absolute()),
@@ -400,6 +450,7 @@ def prepare_dataset(
     data_dir: Path,
     output_dir: Path,
     ann_file: Optional[Path] = None,
+    target_classes: Optional[List[str]] = None,
     train_ratio: float = TRAIN_RATIO,
     val_ratio: float = VAL_RATIO,
     test_ratio: float = TEST_RATIO,
@@ -412,6 +463,7 @@ def prepare_dataset(
         data_dir: Root directory containing TT100K data.
         output_dir: Output directory for processed YOLO-format data.
         ann_file: Path to annotations JSON. Auto-detected if None.
+        target_classes: Optional list of class strings to keep. None = keep all.
         train_ratio: Train split ratio.
         val_ratio: Validation split ratio.
         test_ratio: Test split ratio.
@@ -443,7 +495,9 @@ def prepare_dataset(
         )
 
     # Parse annotations (unified parser handles all 3 formats)
-    annotations = parse_tt100k_annotations(ann_file)
+    annotations, class_list, cat_to_id, cat_to_display = parse_tt100k_annotations(
+        ann_file, target_classes
+    )
 
     if not annotations:
         raise ValueError(
@@ -451,13 +505,18 @@ def prepare_dataset(
         )
 
     # Print class distribution
-    class_counts = {c: 0 for c in TARGET_CLASSES}
+    class_counts = {c: 0 for c in class_list}
     for img_anns in annotations.values():
         for ann in img_anns:
             class_counts[ann["category"]] += 1
-    logger.info("Class distribution:")
-    for cls, count in class_counts.items():
-        logger.info(f"  {cls} ({CLASS_NAMES.get(cls, cls)}): {count}")
+    logger.info("Class distribution (all %d classes):", len(class_list))
+    for cls in class_list:
+        count = class_counts[cls]
+        if count > 0:
+            logger.info(f"  {cls}: {count}")
+    nan_classes = [c for c, n in class_counts.items() if n == 0]
+    if nan_classes:
+        logger.warning(f"  {len(nan_classes)} classes have zero annotations: {nan_classes[:10]}...")
 
     # Find images
     image_paths = find_images(data_dir, list(annotations.keys()))
@@ -529,8 +588,8 @@ def prepare_dataset(
         train_path=str(splits["train"][1].absolute()),
         val_path=str(splits["val"][1].absolute()),
         test_path=str(splits["test"][1].absolute()),
-        nc=len(TARGET_CLASSES),
-        names=[CLASS_NAMES[c] for c in TARGET_CLASSES],
+        nc=len(class_list),
+        class_list=class_list,
     )
 
     # Print summary
@@ -594,6 +653,15 @@ def main():
         default=42,
         help="Random seed (default: 42)",
     )
+    parser.add_argument(
+        "--classes",
+        type=str,
+        nargs="*",
+        default=None,
+        help="Target classes to keep (space-separated). "
+             "Default: keep ALL classes found in annotations. "
+             "Example: --classes i2 i4 i5 pne p10",
+    )
 
     args = parser.parse_args()
 
@@ -602,6 +670,7 @@ def main():
             data_dir=args.data_dir,
             output_dir=args.output_dir,
             ann_file=args.ann_file,
+            target_classes=args.classes if args.classes else None,
             train_ratio=args.train_ratio,
             val_ratio=args.val_ratio,
             test_ratio=args.test_ratio,
