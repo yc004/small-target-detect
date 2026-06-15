@@ -66,21 +66,26 @@ FRONTEND_HTML = """<!DOCTYPE html>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-         background: #0f172a; color: #e2e8f0; overflow: hidden; height: 100dvh; }
+         background: #0f172a; color: #e2e8f0; overflow: hidden;
+         height: 100dvh; height: 100vh; }
+
   #app { display: flex; flex-direction: column; height: 100%; }
 
-  /* Header */
-  #header { padding: 10px 16px; display: flex; align-items: center; gap: 12px;
-            background: #1e293b; border-bottom: 1px solid #334155; flex-shrink: 0; }
-  #header h1 { font-size: 16px; font-weight: 600; white-space: nowrap; }
-  #status { font-size: 12px; padding: 3px 10px; border-radius: 99px; font-weight: 500; }
+  /* ── Header ──────────────────────────────────────────────────────── */
+  #header { padding: 8px 12px; display: flex; align-items: center; gap: 8px;
+            background: #1e293b; border-bottom: 1px solid #334155;
+            flex-shrink: 0; z-index: 10; }
+  #header h1 { font-size: 15px; font-weight: 600; white-space: nowrap;
+               overflow: hidden; text-overflow: ellipsis; }
+  #status { font-size: 11px; padding: 2px 8px; border-radius: 99px;
+            font-weight: 500; white-space: nowrap; flex-shrink: 0; }
   .connected { background: #166534; color: #4ade80; }
   .disconnected { background: #7f1d1d; color: #fca5a5; }
 
-  /* Video area */
+  /* ── Video area ──────────────────────────────────────────────────── */
   #video-container { position: relative; flex: 1; display: flex;
                     align-items: center; justify-content: center;
-                    background: #000; overflow: hidden; }
+                    background: #000; overflow: hidden; min-height: 0; }
   #live-video { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 object-fit: contain; }
   #box-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -88,26 +93,78 @@ FRONTEND_HTML = """<!DOCTYPE html>
   #placeholder { color: #475569; font-size: 14px; text-align: center; padding: 24px;
                  position: relative; z-index: 1; }
 
-  /* Controls bar */
-  #controls { display: flex; gap: 8px; padding: 10px 16px; flex-wrap: wrap;
-              background: #1e293b; border-top: 1px solid #334155; flex-shrink: 0;
-              align-items: center; }
-  button { padding: 10px 18px; border: none; border-radius: 8px; font-size: 14px;
-           font-weight: 600; cursor: pointer; transition: all .15s; }
+  /* ── Controls bar ────────────────────────────────────────────────── */
+  #controls { display: flex; gap: 6px; padding: 8px 12px; flex-wrap: wrap;
+              background: #1e293b; border-top: 1px solid #334155;
+              flex-shrink: 0; align-items: center; z-index: 10; }
+  button { padding: 9px 14px; border: none; border-radius: 8px; font-size: 13px;
+           font-weight: 600; cursor: pointer; transition: all .15s;
+           white-space: nowrap; user-select: none; -webkit-user-select: none; }
   button:active { transform: scale(0.97); }
   #btn-start { background: #2563eb; color: #fff; }
   #btn-stop  { background: #dc2626; color: #fff; }
   button:disabled { opacity: 0.4; pointer-events: none; }
 
-  select { padding: 10px 12px; border-radius: 8px; border: 1px solid #334155;
-           background: #0f172a; color: #e2e8f0; font-size: 14px; }
+  select { padding: 9px 10px; border-radius: 8px; border: 1px solid #334155;
+           background: #0f172a; color: #e2e8f0; font-size: 13px; max-width: 120px; }
 
-  #fps { font-size: 13px; color: #94a3b8; margin-left: auto; white-space: nowrap; }
+  #fps { font-size: 12px; color: #94a3b8; margin-left: auto; white-space: nowrap; }
 
-  /* Stats overlay on video */
-  #stats-overlay { position: absolute; top: 8px; left: 8px; font-size: 12px;
-                   background: rgba(0,0,0,.6); padding: 6px 10px; border-radius: 6px;
-                   color: #f1f5f9; pointer-events: none; }
+  /* ── Stats overlay ───────────────────────────────────────────────── */
+  #stats-overlay { position: absolute; top: 6px; left: 6px; font-size: 11px;
+                   background: rgba(0,0,0,.55); padding: 4px 8px;
+                   border-radius: 5px; color: #f1f5f9;
+                   pointer-events: none; z-index: 5;
+                   max-width: calc(100% - 12px); overflow: hidden;
+                   text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Landscape / narrow-height screens (phones rotated)
+     ════════════════════════════════════════════════════════════════════ */
+  @media (max-height: 500px) {
+    #app { position: relative; }
+
+    /* Header: thin semi-transparent overlay at top, auto-hide */
+    #header { position: absolute; top: 0; left: 0; right: 0;
+              background: linear-gradient(rgba(0,0,0,.7), transparent);
+              border-bottom: none; padding: 4px 8px; opacity: 0;
+              transition: opacity .3s; }
+    #header:hover, #header:focus-within,
+    #app.show-ui #header { opacity: 1; }
+    #header h1 { font-size: 12px; }
+
+    /* Video fills entire screen */
+    #video-container { position: absolute; inset: 0; }
+
+    /* Controls: floating pill at bottom, auto-hide */
+    #controls { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+                border-radius: 99px; background: rgba(15,23,42,.85);
+                backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+                border: 1px solid rgba(255,255,255,.1);
+                padding: 6px 14px; gap: 4px;
+                opacity: 0; transition: opacity .3s; }
+    #controls:hover, #controls:focus-within,
+    #app.show-ui #controls { opacity: 1; }
+    button { padding: 7px 12px; font-size: 12px; border-radius: 99px; }
+    select { padding: 7px 10px; font-size: 12px; max-width: 100px;
+             border-radius: 99px; background: rgba(255,255,255,.08); }
+    #fps { font-size: 11px; margin-left: 4px; }
+
+    /* Stats: more compact */
+    #stats-overlay { top: 4px; left: 4px; font-size: 10px; padding: 3px 6px; }
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Very narrow screens (phones in portrait)
+     ════════════════════════════════════════════════════════════════════ */
+  @media (max-width: 400px) {
+    #header { padding: 6px 8px; gap: 4px; }
+    #header h1 { font-size: 13px; }
+    #controls { padding: 6px 8px; gap: 4px; }
+    button { padding: 8px 10px; font-size: 12px; }
+    select { padding: 8px 8px; font-size: 12px; max-width: 90px; }
+    #fps { font-size: 11px; }
+  }
 </style>
 </head>
 <body>
@@ -146,6 +203,18 @@ const STATE = {
 };
 
 const $ = id => document.getElementById(id);
+
+// ── Tap-to-toggle UI (landscape fullscreen mode) ──────────────────────
+let _uiTimeout = null;
+function showUI() {
+  $('app').classList.add('show-ui');
+  if (_uiTimeout) clearTimeout(_uiTimeout);
+  _uiTimeout = setTimeout(() => $('app').classList.remove('show-ui'), 4000);
+}
+$('video-container').addEventListener('click', showUI);
+$('video-container').addEventListener('touchstart', showUI, {passive: true});
+// Auto-show on start
+showUI();
 
 // ── Camera enumeration ────────────────────────────────────────────────
 async function listCameras() {
