@@ -79,22 +79,20 @@ if [ ! -f "$DATASET_PATH/tt100k_2021.zip" ]; then
     exit 1
 fi
 
-# Activate conda
+# Activate conda (use shell hook — the only reliable way in non-interactive scripts)
 if command -v conda &>/dev/null; then
-    # Source conda.sh if available (needed in non-interactive shells)
-    CONDA_BASE=$(conda info --base 2>/dev/null || echo "")
-    if [ -n "$CONDA_BASE" ] && [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
-        source "$CONDA_BASE/etc/profile.d/conda.sh"
-    fi
+    eval "$(conda shell.bash hook)" 2>/dev/null || true
     conda activate "$CONDA_ENV" 2>/dev/null || {
-        echo "⚠️  Could not activate conda env '$CONDA_ENV'. Continuing with current Python."
+        echo "⚠️  Could not activate conda env '$CONDA_ENV'. Trying base ..."
+        conda activate base 2>/dev/null || true
     }
+    log "  Conda env: ${CONDA_DEFAULT_ENV:-unknown}"
 else
     echo "⚠️  conda not found. Continuing with system Python."
 fi
 
-log "  Python:  $(python3 --version 2>&1)"
-log "  CUDA:    $(python3 -c 'import torch; print(f"torch {torch.__version__}, CUDA available: {torch.cuda.is_available()}, devices: {torch.cuda.device_count()}")' 2>&1 || echo 'N/A')"
+log "  Python:  $(python --version 2>&1)"
+log "  CUDA:    $(python -c 'import torch; print(f"torch {torch.__version__}, CUDA available: {torch.cuda.is_available()}, devices: {torch.cuda.device_count()}")' 2>&1 || echo 'N/A')"
 log "  Stage:   $STAGE  →  $CONFIG"
 log "  Device:  $DEVICE"
 log "  Epochs:  $EPOCHS  |  Batch: $BATCH_SIZE  |  ImgSz: $IMG_SIZE"
@@ -149,7 +147,7 @@ else
 
         if [ -n "$ANN_FILE" ] && [ -f "$ANN_FILE" ]; then
             log "  📋 Converting $ANN_FILE → YOLO format ..."
-            python3 data/prepare_dataset.py \
+            python data/prepare_dataset.py \
                 --data_dir "$EXTRACT_DIR" \
                 --ann_file "$ANN_FILE" \
                 --output_dir "$OUTPUT_DIR"
@@ -166,7 +164,7 @@ else
 
     # Quick stats
     log "  Dataset statistics:"
-    python3 -c "
+    python -c "
 from pathlib import Path
 out = Path('$OUTPUT_DIR')
 for split in ['train', 'val', 'test']:
@@ -204,7 +202,7 @@ else
     for entry in "${REQUIRED_PKGS[@]}"; do
         mod="${entry%%:*}"
         pkg="${entry##*:}"
-        if python3 -c "import $mod" 2>/dev/null; then
+        if python -c "import $mod" 2>/dev/null; then
             :
         else
             MISSING+=("$pkg")
@@ -229,7 +227,7 @@ else
     fi
 
     # Quick verify
-    python3 -c "
+    python -c "
 import cv2; print(f'  ✓ cv2 {cv2.__version__}')
 from ultralytics import YOLO; print('  ✓ ultralytics OK')
 from PIL import Image; print('  ✓ PIL OK')
@@ -253,7 +251,7 @@ echo ""
 
 TRAIN_START=$(date +%s)
 
-python3 scripts/train.py \
+python scripts/train.py \
     --config "$CONFIG" \
     --epochs "$EPOCHS" \
     --batch "$BATCH_SIZE" \
