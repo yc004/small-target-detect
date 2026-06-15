@@ -81,9 +81,12 @@ FRONTEND_HTML = """<!DOCTYPE html>
   #video-container { position: relative; flex: 1; display: flex;
                     align-items: center; justify-content: center;
                     background: #000; overflow: hidden; }
-  #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            object-fit: contain; }
-  #placeholder { color: #475569; font-size: 14px; text-align: center; padding: 24px; }
+  #live-video { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+                object-fit: contain; }
+  #box-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+                 object-fit: contain; pointer-events: none; }
+  #placeholder { color: #475569; font-size: 14px; text-align: center; padding: 24px;
+                 position: relative; z-index: 1; }
 
   /* Controls bar */
   #controls { display: flex; gap: 8px; padding: 10px 16px; flex-wrap: wrap;
@@ -115,7 +118,8 @@ FRONTEND_HTML = """<!DOCTYPE html>
   </div>
 
   <div id="video-container">
-    <canvas id="canvas"></canvas>
+    <video id="live-video" autoplay playsinline muted></video>
+    <canvas id="box-overlay"></canvas>
     <div id="placeholder">📷 点击「开始检测」并授权摄像头</div>
     <div id="stats-overlay"></div>
   </div>
@@ -214,15 +218,19 @@ async function startDetection() {
 
   STATE.ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    // Always update stats overlay immediately
+    const detCount = (data.detections || []).length;
+
+    // Stats overlay
     $('stats-overlay').textContent =
-      `服务端 FPS: ${(data.server_fps || 0).toFixed(1)}  |  检出: ${(data.detections || []).length} 个目标`;
-    // Keep last known boxes — only clear if empty after persistent expiry
-    if (data.detections && data.detections.length > 0) {
-      STATE.persistentDetections = data;
-      STATE.lastBoxTime = performance.now();
+      `服务端 FPS: ${(data.server_fps || 0).toFixed(1)}  |  检出: ${detCount} 个目标`;
+
+    // Draw boxes on overlay canvas — they stay until next message
+    const overlay = STATE.overlayEl;
+    const ctx = STATE.overlayCtx;
+    if (overlay && ctx) {
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      drawBoxes(ctx, overlay.width, overlay.height, data);
     }
-    // If empty, let old boxes stay for HOLD_DURATION before clearing
   };
 
   STATE.ws.onclose = () => {
@@ -236,65 +244,49 @@ async function startDetection() {
   };
 }
 
-// ── Video pipeline ─────────────────────────────────────────────────────
+// ── Video pipeline (no animation loop) ─────────────────────────────────
 function setupVideoPipeline() {
-  const canvas = $('canvas');
-  const ctx = canvas.getContext('2d');
+  const video = $('live-video');
+  const overlay = $('box-overlay');
 
-  const video = document.createElement('video');
   video.srcObject = STATE.stream;
   video.playsInline = true;
   video.muted = true;
-  video.play();
+  video.play().catch(e => console.warn('video play:', e));
 
-  // Resize canvas when video metadata loads
   video.addEventListener('loadedmetadata', () => {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
   });
 
-  // Draw video frame + persistent detection boxes each animation frame
-  const HOLD_DURATION = 800;  // ms to keep old boxes after target disappears
-  function drawVideo() {
-    if (!STATE.running) return;
-    if (video.readyState >= video.HAVE_CURRENT_DATA) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      // Draw last known boxes — they persist between server responses
-      if (STATE.persistentDetections) {
-        const age = performance.now() - (STATE.lastBoxTime || 0);
-        if (age < HOLD_DURATION) {
-          drawBoxes(ctx, canvas.width, canvas.height, STATE.persistentDetections);
-        } else {
-          STATE.persistentDetections = null;
-        }
-      }
-    }
-    requestAnimationFrame(drawVideo);
-  }
-  drawVideo();
-
-  // Store video reference for capture
-  STATE.videoElement = video;
+  STATE.videoEl = video;
+  STATE.overlayEl = overlay;
+  STATE.overlayCtx = overlay.getContext('2d');
 }
 
-// ── Send frames to server (throttled) ──────────────────────────────────
+// ── Send frames to server (setInterval, not animation loop) ─────────────
+let _sendTimer = null;
 function sendLoop() {
-  if (!STATE.running) return;
+  if (_sendTimer) clearInterval(_sendTimer);
+  _sendTimer = setInterval(() => {
+    if (!STATE.running || STATE.ws?.readyState !== WebSocket.OPEN) return;
 
-  const now = performance.now();
-  if (now - STATE.lastFrameTime >= STATE.frameInterval) {
-    STATE.lastFrameTime = now;
+    const video = STATE.videoEl;
+    if (!video || video.readyState < video.HAVE_CURRENT_DATA) return;
 
-    const canvas = $('canvas');
-    canvas.toBlob(blob => {
+    // Capture frame from video to an offscreen canvas
+    const offscreen = document.createElement('canvas');
+    offscreen.width = video.videoWidth;
+    offscreen.height = video.videoHeight;
+    offscreen.getContext('2d').drawImage(video, 0, 0);
+
+    offscreen.toBlob(blob => {
       if (blob && STATE.ws?.readyState === WebSocket.OPEN) {
         STATE.ws.send(blob);
         STATE.frameCount++;
       }
     }, 'image/jpeg', 0.75);
-  }
-
-  requestAnimationFrame(sendLoop);
+  }, STATE.frameInterval);
 }
 
 // ── FPS counter ────────────────────────────────────────────────────────
@@ -341,11 +333,15 @@ function drawBoxes(ctx, w, h, data) {
 // ── Stop ───────────────────────────────────────────────────────────────
 function stopDetection() {
   STATE.running = false;
+  if (_sendTimer) { clearInterval(_sendTimer); _sendTimer = null; }
   if (STATE.ws) { STATE.ws.close(); STATE.ws = null; }
   if (STATE.stream) {
     STATE.stream.getTracks().forEach(t => t.stop());
     STATE.stream = null;
   }
+  // Clear video
+  const video = $('live-video');
+  if (video) video.srcObject = null;
   resetUI();
 }
 
@@ -355,11 +351,12 @@ function resetUI() {
   $('placeholder').style.display = 'block';
   $('stats-overlay').textContent = '';
   $('fps').textContent = 'FPS: --';
-  STATE.persistentDetections = null;
-  STATE.lastBoxTime = 0;
-  // Clear canvas
-  const ctx = $('canvas').getContext('2d');
-  ctx.clearRect(0, 0, $('canvas').width, $('canvas').height);
+  // Clear overlay canvas
+  const overlay = $('box-overlay');
+  if (overlay) {
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+  }
 }
 </script>
 </body>
