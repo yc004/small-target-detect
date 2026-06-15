@@ -18,7 +18,7 @@ epochs: 100
 batch: 8                          # Down from 16 for P2 overhead
 workers: 8
 device: "0"
-amp: false
+amp: true
 
 # Optimization
 optimizer: "auto"
