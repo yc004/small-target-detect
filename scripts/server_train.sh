@@ -71,8 +71,11 @@ step() { echo ""; echo "━━━━━━━━━━━━━━━━━━�
 # ─── Sanity checks ───────────────────────────────────────────────────────────
 log "🔍 Pre-flight checks ..."
 
-if [ ! -d "$DATASET_PATH" ]; then
-    echo "❌ Dataset path not found: $DATASET_PATH"
+if [ ! -f "$DATASET_PATH/tt100k_2021.zip" ]; then
+    echo "❌ Dataset not found: $DATASET_PATH/tt100k_2021.zip"
+    echo "   Expected: /public/data/image/TT100K/tt100k_2021.zip"
+    echo "   Contents of $DATASET_PATH:"
+    ls -lh "$DATASET_PATH" 2>/dev/null || echo "   (directory not accessible)"
     exit 1
 fi
 
@@ -108,47 +111,53 @@ else
         log "  ✓ dataset.yaml already exists — skipping preparation."
         log "    To force re-prepare: rm -rf $OUTPUT_DIR"
     else
-        log "  Scanning $DATASET_PATH ..."
+        # ── The dataset path contains two zips: tt100k_2016.zip and tt100k_2021.zip ──
+        ZIP_2021="$DATASET_PATH/tt100k_2021.zip"
 
-        # Detect dataset format
-        YOLO_ZIP=$(find "$DATASET_PATH" -maxdepth 3 \( -name "*YOLO*.zip" -o -name "*yolo*.zip" \) 2>/dev/null | head -1 || true)
-        ANN_FILE=$(find "$DATASET_PATH" -maxdepth 3 -name "annotations_all.json" 2>/dev/null | head -1 || true)
-        [ -z "$ANN_FILE" ] && ANN_FILE=$(find "$DATASET_PATH" -maxdepth 3 -name "annotations.json" 2>/dev/null | head -1 || true)
+        if [ ! -f "$ZIP_2021" ]; then
+            echo "❌ tt100k_2021.zip not found at $ZIP_2021"
+            echo "   Contents of $DATASET_PATH:"
+            ls -lh "$DATASET_PATH" 2>/dev/null || echo "   (directory not accessible)"
+            exit 1
+        fi
 
-        if [ -n "$YOLO_ZIP" ] && [ -f "$YOLO_ZIP" ]; then
-            log "  📦 Found YOLO-format ZIP, extracting ..."
-            python3 data/extract_dataset.py \
-                --zip_path "$YOLO_ZIP" --output_dir "$OUTPUT_DIR"
+        log "  📦 Found tt100k_2021.zip ($(du -h "$ZIP_2021" | cut -f1))"
 
-        elif [ -n "$ANN_FILE" ] && [ -f "$ANN_FILE" ]; then
-            log "  📋 Found $ANN_FILE, converting to YOLO format ..."
+        # Extract to a temp directory under data/
+        EXTRACT_DIR="data/TT100K_2021"
+        if [ ! -f "$EXTRACT_DIR/.extracted" ]; then
+            log "  ⏳ Extracting (this may take a few minutes) ..."
+            rm -rf "$EXTRACT_DIR"
+            mkdir -p "$EXTRACT_DIR"
+            unzip -qo "$ZIP_2021" -d "$EXTRACT_DIR/"
+            touch "$EXTRACT_DIR/.extracted"
+            log "  ✓ Extracted to $EXTRACT_DIR"
+        else
+            log "  ✓ Already extracted at $EXTRACT_DIR"
+        fi
+
+        # Handle case where zip extracts into a single subdirectory
+        SUBDIRS=$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.extracted' 2>/dev/null | wc -l)
+        if [ "$SUBDIRS" -eq 1 ]; then
+            EXTRACT_DIR=$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)
+            log "  📁 Dataset root: $EXTRACT_DIR"
+        fi
+
+        # Find annotation file
+        ANN_FILE=$(find "$EXTRACT_DIR" -maxdepth 2 -name "annotations_all.json" 2>/dev/null | head -1 || true)
+        [ -z "$ANN_FILE" ] && ANN_FILE=$(find "$EXTRACT_DIR" -maxdepth 2 -name "annotations.json" 2>/dev/null | head -1 || true)
+
+        if [ -n "$ANN_FILE" ] && [ -f "$ANN_FILE" ]; then
+            log "  📋 Converting $ANN_FILE → YOLO format ..."
             python3 data/prepare_dataset.py \
-                --data_dir "$(dirname "$ANN_FILE")" \
+                --data_dir "$EXTRACT_DIR" \
                 --ann_file "$ANN_FILE" \
                 --output_dir "$OUTPUT_DIR"
-
-        elif [ -d "$DATASET_PATH/images" ] && [ -d "$DATASET_PATH/labels" ]; then
-            log "  📁 YOLO directory structure detected, linking ..."
-            mkdir -p "$OUTPUT_DIR/images" "$OUTPUT_DIR/labels"
-            cp -rn "$DATASET_PATH/images/"* "$OUTPUT_DIR/images/" 2>/dev/null || true
-            cp -rn "$DATASET_PATH/labels/"* "$OUTPUT_DIR/labels/" 2>/dev/null || true
-            python3 -c "
-import yaml
-from pathlib import Path
-out = Path('$OUTPUT_DIR')
-test_dir = out / 'images' / 'test'
-test = str(test_dir) if test_dir.exists() else str(out / 'images' / 'val')
-config = {'path': str(out.absolute()), 'train': str(out / 'images' / 'train'),
-          'val': str(out / 'images' / 'val'), 'test': test, 'nc': 5,
-          'names': ['speed_limit_5','speed_limit_30','speed_limit_40','no_entry','no_pedestrians']}
-with open(out / 'dataset.yaml', 'w') as f:
-    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-print('  ✓ dataset.yaml written')
-"
+            log "  ✓ Conversion complete"
         else
-            echo "❌ Cannot detect dataset format in $DATASET_PATH"
-            echo "   Expected: annotations_all.json, YOLO .zip, or images/ + labels/"
-            ls -l "$DATASET_PATH" 2>/dev/null | head -20
+            echo "❌ No annotation file (annotations_all.json / annotations.json) found in $EXTRACT_DIR"
+            echo "   Top-level contents:"
+            ls -l "$EXTRACT_DIR" 2>/dev/null | head -20
             exit 1
         fi
 
