@@ -26,6 +26,11 @@ from pathlib import Path
 import cv2
 import yaml
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from models.model_builder import register_custom_modules
+register_custom_modules()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",

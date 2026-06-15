@@ -21,6 +21,11 @@ from pathlib import Path
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Register ARF, BCEM custom modules before ultralytics parses any YAML
+from models.model_builder import register_custom_modules
+register_custom_modules()
 
 logging.basicConfig(
     level=logging.INFO,
