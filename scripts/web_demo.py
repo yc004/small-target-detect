@@ -57,377 +57,440 @@ logger = logging.getLogger(__name__)
 # HTML Frontend (single-page, embedded)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-FRONTEND_HTML = """<!DOCTYPE html>
+FRONTEND_HTML = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>小目标交通标志实时检测</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>交通标志检测</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-         background: #0f172a; color: #e2e8f0; overflow: hidden;
-         height: 100dvh; height: 100vh; }
+  :root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --bg: #0a0a0f;
+    --surface: rgba(20,20,35,0.92);
+    --text: #e8e8f0;
+    --muted: #8888a0;
+    --accent: #3b82f6;
+    --danger: #ef4444;
+    --success: #22c55e;
+    --radius: 14px;
+  }
 
-  #app { display: flex; flex-direction: column; height: 100%; }
-
-  /* ── Header ──────────────────────────────────────────────────────── */
-  #header { padding: 8px 12px; display: flex; align-items: center; gap: 8px;
-            background: #1e293b; border-bottom: 1px solid #334155;
-            flex-shrink: 0; z-index: 10; }
-  #header h1 { font-size: 15px; font-weight: 600; white-space: nowrap;
-               overflow: hidden; text-overflow: ellipsis; }
-  #status { font-size: 11px; padding: 2px 8px; border-radius: 99px;
-            font-weight: 500; white-space: nowrap; flex-shrink: 0; }
-  .connected { background: #166534; color: #4ade80; }
-  .disconnected { background: #7f1d1d; color: #fca5a5; }
-
-  /* ── Video area ──────────────────────────────────────────────────── */
-  #video-container { position: relative; flex: 1; display: flex;
-                    align-items: center; justify-content: center;
-                    background: #000; overflow: hidden; min-height: 0; }
-  #live-video { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-                object-fit: contain; }
-  #box-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-                 object-fit: contain; pointer-events: none; }
-  #placeholder { color: #475569; font-size: 14px; text-align: center; padding: 24px;
-                 position: relative; z-index: 1; }
-
-  /* ── Controls bar ────────────────────────────────────────────────── */
-  #controls { display: flex; gap: 6px; padding: 8px 12px; flex-wrap: wrap;
-              background: #1e293b; border-top: 1px solid #334155;
-              flex-shrink: 0; align-items: center; z-index: 10; }
-  button { padding: 9px 14px; border: none; border-radius: 8px; font-size: 13px;
-           font-weight: 600; cursor: pointer; transition: all .15s;
-           white-space: nowrap; user-select: none; -webkit-user-select: none; }
-  button:active { transform: scale(0.97); }
-  #btn-start { background: #2563eb; color: #fff; }
-  #btn-stop  { background: #dc2626; color: #fff; }
-  button:disabled { opacity: 0.4; pointer-events: none; }
-
-  select { padding: 9px 10px; border-radius: 8px; border: 1px solid #334155;
-           background: #0f172a; color: #e2e8f0; font-size: 13px; max-width: 120px; }
-
-  #fps { font-size: 12px; color: #94a3b8; margin-left: auto; white-space: nowrap; }
-
-  /* ── Stats overlay ───────────────────────────────────────────────── */
-  #stats-overlay { position: absolute; top: 6px; left: 6px; font-size: 11px;
-                   background: rgba(0,0,0,.55); padding: 4px 8px;
-                   border-radius: 5px; color: #f1f5f9;
-                   pointer-events: none; z-index: 5;
-                   max-width: calc(100% - 12px); overflow: hidden;
-                   text-overflow: ellipsis; white-space: nowrap; }
-
-  /* ════════════════════════════════════════════════════════════════════
-     Landscape / narrow-height screens — compact sizing only
-     ════════════════════════════════════════════════════════════════════ */
-  @media (max-height: 500px) {
-    #header { padding: 3px 8px; }
-    #header h1 { font-size: 12px; }
-    #status { font-size: 10px; padding: 1px 6px; }
-
-    #controls { padding: 4px 8px; gap: 4px; }
-    button { padding: 6px 10px; font-size: 12px; }
-    select { padding: 6px 8px; font-size: 12px; max-width: 90px; }
-    #fps { font-size: 11px; }
-
-    #stats-overlay { top: 3px; left: 3px; font-size: 10px; padding: 2px 5px; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text);
+    overflow: hidden; height: 100dvh; touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* ════════════════════════════════════════════════════════════════════
-     Immersive mode — hide header & controls (toggled by user)
+     Video — full screen background
      ════════════════════════════════════════════════════════════════════ */
-  #app.immersive #header,
-  #app.immersive #controls { opacity: 0; pointer-events: none; }
-  #app.immersive #header:hover,
-  #app.immersive #controls:hover { opacity: 1; pointer-events: auto; }
-
-  /* Fullscreen toggle button */
-  #btn-fullscreen { background: transparent; border: 1px solid #475569;
-                    color: #94a3b8; padding: 6px 10px; font-size: 12px;
-                    border-radius: 99px; }
-  #btn-fullscreen.active { background: #2563eb; border-color: #2563eb;
-                           color: #fff; }
+  #video-container {
+    position: fixed; inset: 0; background: #000;
+  }
+  #live-video {
+    width: 100%; height: 100%; object-fit: contain; display: block;
+  }
+  #box-overlay {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; pointer-events: none;
+  }
 
   /* ════════════════════════════════════════════════════════════════════
-     Very narrow screens (phones in portrait)
+     Top bar — status line
      ════════════════════════════════════════════════════════════════════ */
-  @media (max-width: 400px) {
-    #header { padding: 6px 8px; gap: 4px; }
-    #header h1 { font-size: 13px; }
-    #controls { padding: 6px 8px; gap: 4px; }
-    button { padding: 8px 10px; font-size: 12px; }
-    select { padding: 8px 8px; font-size: 12px; max-width: 90px; }
-    #fps { font-size: 11px; }
+  #top-bar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+    padding: calc(8px + var(--safe-top)) 12px 8px;
+    background: linear-gradient(rgba(0,0,0,0.6) 60%, transparent);
+    display: flex; align-items: center; gap: 8px;
+    transition: opacity 0.3s, transform 0.3s;
   }
+  #top-bar.hidden { opacity: 0; transform: translateY(-100%); pointer-events: none; }
+
+  #top-bar .title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+  #top-bar .badge {
+    font-size: 11px; padding: 3px 9px; border-radius: 99px; font-weight: 600;
+  }
+  .badge-live { background: var(--success); color: #000; animation: pulse 2s infinite; }
+  .badge-off  { background: rgba(255,255,255,0.12); color: var(--muted); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Stats pill — detection count + FPS
+     ════════════════════════════════════════════════════════════════════ */
+  #stats-pill {
+    position: fixed; top: calc(52px + var(--safe-top)); left: 50%;
+    transform: translateX(-50%); z-index: 20;
+    background: var(--surface); backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 99px; padding: 6px 14px; font-size: 12px;
+    display: flex; gap: 12px; align-items: center;
+    white-space: nowrap; transition: opacity 0.3s;
+  }
+  #stats-pill.hidden { opacity: 0; pointer-events: none; }
+  #stats-pill .det-count { color: var(--accent); font-weight: 700; }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Placeholder
+     ════════════════════════════════════════════════════════════════════ */
+  #placeholder {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 5;
+    color: var(--muted); gap: 12px; text-align: center; padding: 20px;
+  }
+  #placeholder .icon { font-size: 48px; opacity: 0.5; }
+  #placeholder .text { font-size: 15px; line-height: 1.5; }
+
+  /* ════════════════════════════════════════════════════════════════════
+     FAB — primary action button (bottom-right)
+     ════════════════════════════════════════════════════════════════════ */
+  #fab {
+    position: fixed; bottom: calc(24px + var(--safe-bottom));
+    right: 20px; z-index: 30;
+    width: 60px; height: 60px; border-radius: 50%;
+    border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; color: #fff;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+    -webkit-tap-highlight-color: transparent;
+  }
+  #fab:active { transform: scale(0.92); }
+  #fab.start { background: var(--accent); }
+  #fab.stop  { background: var(--danger); }
+
+  #fab-label {
+    position: fixed; bottom: calc(34px + var(--safe-bottom));
+    right: 88px; z-index: 30;
+    font-size: 13px; font-weight: 600; color: #fff;
+    background: rgba(0,0,0,0.7); padding: 6px 12px; border-radius: 99px;
+    pointer-events: none; opacity: 0;
+    transition: opacity 0.2s;
+  }
+  #fab:hover + #fab-label,
+  #fab:active + #fab-label { opacity: 1; }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Bottom sheet — camera picker + settings
+     ════════════════════════════════════════════════════════════════════ */
+  #bottom-sheet {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 25;
+    background: var(--surface); backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px 20px 0 0;
+    padding: 8px 16px calc(12px + var(--safe-bottom));
+    display: flex; align-items: center; gap: 10px;
+    transform: translateY(0);
+    transition: transform 0.35s cubic-bezier(0.4,0,0.2,1);
+  }
+  #bottom-sheet.collapsed { transform: translateY(calc(100% - 52px)); }
+
+  #bottom-sheet .handle {
+    position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    width: 36px; height: 4px; border-radius: 99px;
+    background: rgba(255,255,255,0.2);
+  }
+
+  #bottom-sheet select {
+    flex: 1; min-width: 0;
+    padding: 10px 12px; border-radius: var(--radius);
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.06); color: var(--text);
+    font-size: 14px; -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238888a0' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+  }
+
+  #bottom-sheet button {
+    padding: 10px 16px; border-radius: var(--radius);
+    border: none; font-size: 13px; font-weight: 600;
+    cursor: pointer; white-space: nowrap;
+    background: rgba(255,255,255,0.08); color: var(--text);
+    transition: all 0.15s;
+  }
+  #bottom-sheet button:active { transform: scale(0.96); }
+  #bottom-sheet button.accent { background: var(--accent); color: #fff; }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Toast
+     ════════════════════════════════════════════════════════════════════ */
+  #toast {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(0.8);
+    background: rgba(0,0,0,0.85); color: #fff;
+    padding: 10px 20px; border-radius: 99px; font-size: 14px; font-weight: 600;
+    z-index: 40; pointer-events: none; opacity: 0;
+    transition: all 0.2s;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
 </style>
 </head>
 <body>
-<div id="app">
-  <div id="header">
-    <h1>🚦 小目标交通标志实时检测</h1>
-    <span id="status" class="disconnected">未连接</span>
-  </div>
 
-  <div id="video-container">
-    <video id="live-video" autoplay playsinline muted></video>
-    <canvas id="box-overlay"></canvas>
-    <div id="placeholder">📷 点击「开始检测」并授权摄像头</div>
-    <div id="stats-overlay"></div>
-  </div>
-
-  <div id="controls">
-    <select id="camera-select"></select>
-    <button id="btn-start" onclick="startDetection()">▶ 开始检测</button>
-    <button id="btn-stop" onclick="stopDetection()" disabled>⏹ 停止</button>
-    <button id="btn-fullscreen" onclick="toggleImmersive()">⊡ 全屏</button>
-    <span id="fps">FPS: --</span>
-  </div>
+<div id="video-container">
+  <video id="live-video" autoplay playsinline muted></video>
+  <canvas id="box-overlay"></canvas>
 </div>
 
-<script>
-const STATE = {
-  ws: null,
-  stream: null,
-  running: false,
-  lastFrameTime: 0,
-  fps: 0,
-  frameCount: 0,
-  fpsTimer: 0,
-  targetFps: 15,        // send at most N frames/sec to server
-  frameInterval: 1000 / 15,
-};
+<div id="top-bar">
+  <span class="title">🚦 交通标志检测</span>
+  <span class="badge badge-off" id="badge">待机</span>
+</div>
 
+<div id="stats-pill" class="hidden">
+  <span>检出 <span class="det-count" id="det-num">0</span> 个目标</span>
+  <span style="color:var(--muted)">|</span>
+  <span id="sv-fps">0 fps</span>
+</div>
+
+<div id="placeholder">
+  <span class="icon">📷</span>
+  <span class="text">点击下方按钮开始检测<br>需要授权摄像头访问</span>
+</div>
+
+<button id="fab" class="start" onclick="handleFab()">▶</button>
+<span id="fab-label">开始检测</span>
+
+<div id="bottom-sheet" class="collapsed">
+  <div class="handle" onclick="toggleSheet()"></div>
+  <select id="camera-select"></select>
+  <button id="btn-immersive" onclick="toggleImmersive()">⛶</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
 const $ = id => document.getElementById(id);
 
-// ── Immersive mode toggle ──────────────────────────────────────────────
-function toggleImmersive() {
-  const app = $('app');
-  app.classList.toggle('immersive');
-  const btn = $('btn-fullscreen');
-  if (app.classList.contains('immersive')) {
-    btn.textContent = '⊡ 退出全屏';
-    btn.classList.add('active');
-  } else {
-    btn.textContent = '⊡ 全屏';
-    btn.classList.remove('active');
-  }
+const STATE = {
+  ws: null, stream: null, running: false,
+  frameCount: 0, fps: 0, fpsTimer: 0,
+  frameInterval: 1000 / 15,
+  immersive: false,
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// Toast
+// ═══════════════════════════════════════════════════════════════════════
+function toast(msg, ms=1500) {
+  const t = $('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
-// ── Camera enumeration ────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// Bottom sheet
+// ═══════════════════════════════════════════════════════════════════════
+function toggleSheet() {
+  $('bottom-sheet').classList.toggle('collapsed');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Immersive mode
+// ═══════════════════════════════════════════════════════════════════════
+function toggleImmersive() {
+  STATE.immersive = !STATE.immersive;
+  const hide = STATE.immersive;
+  $('top-bar').classList.toggle('hidden', hide);
+  if (STATE.running) $('stats-pill').classList.toggle('hidden', hide);
+  $('bottom-sheet').classList.toggle('collapsed', hide);
+  $('btn-immersive').textContent = hide ? '⛶' : '⛶';
+  $('btn-immersive').style.background = hide ? 'var(--accent)' : '';
+  toast(hide ? '沉浸模式' : '退出沉浸');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Camera list
+// ═══════════════════════════════════════════════════════════════════════
 async function listCameras() {
   try {
-    // Need to request once to get labels on some browsers
-    await navigator.mediaDevices.getUserMedia({video: true})
-      .then(s => { s.getTracks().forEach(t => t.stop()); })
-      .catch(() => {});
+    await navigator.mediaDevices.getUserMedia({video:true})
+      .then(s => s.getTracks().forEach(t => t.stop())).catch(()=>{});
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const videos = devices.filter(d => d.kind === 'videoinput');
     const sel = $('camera-select');
     sel.innerHTML = '';
-    videos.forEach((d, i) => {
-      const opt = document.createElement('option');
-      opt.value = d.deviceId;
-      opt.textContent = d.label || `摄像头 ${i + 1}`;
-      sel.appendChild(opt);
+    devices.filter(d => d.kind === 'videoinput').forEach((d,i) => {
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || `摄像头 ${i+1}`;
+      sel.appendChild(o);
     });
-  } catch (e) {
-    console.warn('Cannot enumerate cameras:', e);
-  }
+  } catch(e) { console.warn('camera enum:', e); }
 }
 listCameras();
 
-// ── Start ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// FAB handler
+// ═══════════════════════════════════════════════════════════════════════
+function handleFab() {
+  STATE.running ? stopDetection() : startDetection();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Start
+// ═══════════════════════════════════════════════════════════════════════
 async function startDetection() {
   if (STATE.running) return;
+  if (STATE.stream) { STATE.stream.getTracks().forEach(t => t.stop()); }
 
-  // Stop any existing stream
-  if (STATE.stream) {
-    STATE.stream.getTracks().forEach(t => t.stop());
-  }
-
-  const deviceId = $('camera-select').value;
   const constraints = {
     video: {
-      deviceId: deviceId ? { exact: deviceId } : undefined,
-      width: { ideal: 640 },
-      height: { ideal: 480 },
-      facingMode: 'environment',   // prefer rear camera on mobile
+      deviceId: $('camera-select').value ? {exact:$('camera-select').value} : undefined,
+      width: {ideal:640}, height: {ideal:480},
+      facingMode: 'environment',
     },
     audio: false,
   };
 
   try {
     STATE.stream = await navigator.mediaDevices.getUserMedia(constraints);
-  } catch (e) {
-    alert('无法访问摄像头: ' + e.message);
-    return;
-  }
+  } catch(e) { alert('无法访问摄像头: '+e.message); return; }
 
-  // Connect WebSocket
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const wsUrl = `${proto}://${location.host}/ws`;
-  STATE.ws = new WebSocket(wsUrl);
+  const proto = location.protocol==='https:'?'wss':'ws';
+  STATE.ws = new WebSocket(`${proto}://${location.host}/ws`);
   STATE.ws.binaryType = 'arraybuffer';
 
   STATE.ws.onopen = () => {
-    $('status').textContent = '已连接';
-    $('status').className = 'connected';
-    $('btn-start').disabled = true;
-    $('btn-stop').disabled = false;
-    $('placeholder').style.display = 'none';
-    STATE.running = true;
-    STATE.frameCount = 0;
+    STATE.running = true; STATE.frameCount = 0;
     STATE.fpsTimer = performance.now();
-    setupVideoPipeline();
+
+    // UI state
+    $('fab').className = 'stop'; $('fab').textContent = '⏹';
+    $('fab-label').textContent = '停止检测';
+    $('badge').textContent = '检测中'; $('badge').className = 'badge badge-live';
+    $('placeholder').style.display = 'none';
+    $('stats-pill').classList.remove('hidden');
+    $('bottom-sheet').classList.add('collapsed');
+    $('btn-immersive').style.display = '';
+
+    setupVideo();
     sendLoop();
   };
 
-  STATE.ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    const detCount = (data.detections || []).length;
+  STATE.ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    const n = (data.detections||[]).length;
+    $('det-num').textContent = n;
+    $('sv-fps').textContent = (data.server_fps||0).toFixed(1)+' fps';
 
-    // Stats overlay
-    $('stats-overlay').textContent =
-      `服务端 FPS: ${(data.server_fps || 0).toFixed(1)}  |  检出: ${detCount} 个目标`;
-
-    // Draw boxes on overlay canvas — they stay until next message
-    const overlay = STATE.overlayEl;
-    const ctx = STATE.overlayCtx;
-    if (overlay && ctx) {
-      ctx.clearRect(0, 0, overlay.width, overlay.height);
-      drawBoxes(ctx, overlay.width, overlay.height, data);
+    const ctx = STATE.overlayCtx, ov = STATE.overlayEl;
+    if (ctx && ov) {
+      ctx.clearRect(0,0,ov.width,ov.height);
+      drawBoxes(ctx, ov.width, ov.height, data);
     }
   };
 
-  STATE.ws.onclose = () => {
-    $('status').textContent = '未连接';
-    $('status').className = 'disconnected';
-    resetUI();
-  };
-
-  STATE.ws.onerror = () => {
-    STATE.ws?.close();
-  };
+  STATE.ws.onclose = () => { toast('连接断开'); resetAll(); };
+  STATE.ws.onerror = () => STATE.ws?.close();
 }
 
-// ── Video pipeline (no animation loop) ─────────────────────────────────
-function setupVideoPipeline() {
-  const video = $('live-video');
-  const overlay = $('box-overlay');
-
-  video.srcObject = STATE.stream;
-  video.playsInline = true;
-  video.muted = true;
-  video.play().catch(e => console.warn('video play:', e));
-
-  video.addEventListener('loadedmetadata', () => {
-    overlay.width = video.videoWidth;
-    overlay.height = video.videoHeight;
+// ═══════════════════════════════════════════════════════════════════════
+// Video setup
+// ═══════════════════════════════════════════════════════════════════════
+function setupVideo() {
+  const v = $('live-video'), ov = $('box-overlay');
+  v.srcObject = STATE.stream; v.playsInline = true; v.muted = true;
+  v.play().catch(e => console.warn(e));
+  v.addEventListener('loadedmetadata', () => {
+    ov.width = v.videoWidth; ov.height = v.videoHeight;
   });
-
-  STATE.videoEl = video;
-  STATE.overlayEl = overlay;
-  STATE.overlayCtx = overlay.getContext('2d');
+  STATE.videoEl = v; STATE.overlayEl = ov;
+  STATE.overlayCtx = ov.getContext('2d');
 }
 
-// ── Send frames to server (setInterval, not animation loop) ─────────────
+// ═══════════════════════════════════════════════════════════════════════
+// Send loop
+// ═══════════════════════════════════════════════════════════════════════
 let _sendTimer = null;
 function sendLoop() {
-  if (_sendTimer) clearInterval(_sendTimer);
+  clearInterval(_sendTimer);
   _sendTimer = setInterval(() => {
-    if (!STATE.running || STATE.ws?.readyState !== WebSocket.OPEN) return;
-
-    const video = STATE.videoEl;
-    if (!video || video.readyState < video.HAVE_CURRENT_DATA) return;
-
-    // Capture frame from video to an offscreen canvas
-    const offscreen = document.createElement('canvas');
-    offscreen.width = video.videoWidth;
-    offscreen.height = video.videoHeight;
-    offscreen.getContext('2d').drawImage(video, 0, 0);
-
-    offscreen.toBlob(blob => {
-      if (blob && STATE.ws?.readyState === WebSocket.OPEN) {
-        STATE.ws.send(blob);
-        STATE.frameCount++;
+    if (!STATE.running || STATE.ws?.readyState!==WebSocket.OPEN) return;
+    const v = STATE.videoEl;
+    if (!v || v.readyState < v.HAVE_CURRENT_DATA) return;
+    const c = document.createElement('canvas');
+    c.width=v.videoWidth; c.height=v.videoHeight;
+    c.getContext('2d').drawImage(v,0,0);
+    c.toBlob(b => {
+      if (b && STATE.ws?.readyState===WebSocket.OPEN) {
+        STATE.ws.send(b); STATE.frameCount++;
       }
-    }, 'image/jpeg', 0.75);
+    },'image/jpeg',0.75);
   }, STATE.frameInterval);
 }
 
-// ── FPS counter ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// FPS
+// ═══════════════════════════════════════════════════════════════════════
 setInterval(() => {
-  const now = performance.now();
-  const elapsed = (now - STATE.fpsTimer) / 1000;
-  if (elapsed >= 2.0) {
-    STATE.fps = Math.round(STATE.frameCount / elapsed);
-    STATE.frameCount = 0;
-    STATE.fpsTimer = now;
-    $('fps').textContent = `发送 FPS: ${STATE.fps}`;
+  if (!STATE.running) return;
+  const now = performance.now(), el = (now-STATE.fpsTimer)/1000;
+  if (el >= 2) {
+    STATE.fps = Math.round(STATE.frameCount/el);
+    STATE.frameCount=0; STATE.fpsTimer=now;
   }
-}, 2000);
+},2000);
 
-// ── Draw detection boxes (called from animation loop) ─────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// Draw boxes
+// ═══════════════════════════════════════════════════════════════════════
 const COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6',
                 '#8b5cf6','#ec4899','#06b6d4','#84cc16','#f43f5e'];
 
 function drawBoxes(ctx, w, h, data) {
-  const detections = data.detections || [];
-  for (const det of detections) {
-    const [x1, y1, x2, y2] = det.bbox;
-    const color = COLORS[det.class_id % COLORS.length];
+  for (const d of (data.detections||[])) {
+    const [x1,y1,x2,y2] = d.bbox;
+    const c = COLORS[d.class_id % COLORS.length];
+    ctx.strokeStyle = c;
+    ctx.lineWidth = Math.max(2.5, w/350);
+    ctx.strokeRect(x1*w, y1*h, (x2-x1)*w, (y2-y1)*h);
 
-    // Bounding box
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(2, w / 400);
-    ctx.strokeRect(x1 * w, y1 * h, (x2 - x1) * w, (y2 - y1) * h);
-
-    // Label
-    const label = `${det.name} ${(det.conf * 100).toFixed(0)}%`;
-    const fontSize = Math.max(12, w / 50);
-    ctx.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
-    const metrics = ctx.measureText(label);
-    const lx = x1 * w;
-    const ly = Math.max(0, y1 * h - fontSize * 1.6);
-    ctx.fillStyle = color;
-    ctx.fillRect(lx, ly, metrics.width + 8, fontSize * 1.6);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(label, lx + 4, ly + fontSize * 1.1);
+    const label = `${d.name} ${(d.conf*100)|0}%`;
+    const fs = Math.max(13, w/45);
+    ctx.font = `600 ${fs}px -apple-system, sans-serif`;
+    const m = ctx.measureText(label);
+    const lx = x1*w, ly = Math.max(0, y1*h - fs*1.7);
+    ctx.fillStyle = c; ctx.fillRect(lx, ly, m.width+8, fs*1.7);
+    ctx.fillStyle = '#fff'; ctx.fillText(label, lx+4, ly+fs*1.2);
   }
 }
 
-// ── Stop ───────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// Stop
+// ═══════════════════════════════════════════════════════════════════════
 function stopDetection() {
   STATE.running = false;
-  if (_sendTimer) { clearInterval(_sendTimer); _sendTimer = null; }
+  clearInterval(_sendTimer); _sendTimer = null;
   if (STATE.ws) { STATE.ws.close(); STATE.ws = null; }
-  if (STATE.stream) {
-    STATE.stream.getTracks().forEach(t => t.stop());
-    STATE.stream = null;
-  }
-  // Clear video
-  const video = $('live-video');
-  if (video) video.srcObject = null;
-  resetUI();
+  if (STATE.stream) { STATE.stream.getTracks().forEach(t => t.stop()); STATE.stream = null; }
+  $('live-video').srcObject = null;
+  resetAll();
 }
 
-function resetUI() {
-  $('btn-start').disabled = false;
-  $('btn-stop').disabled = true;
-  $('placeholder').style.display = 'block';
-  $('stats-overlay').textContent = '';
-  $('fps').textContent = 'FPS: --';
-  // Exit immersive mode
-  $('app').classList.remove('immersive');
-  $('btn-fullscreen').textContent = '⊡ 全屏';
-  $('btn-fullscreen').classList.remove('active');
-  // Clear overlay canvas
-  const overlay = $('box-overlay');
-  if (overlay) {
-    const ctx = overlay.getContext('2d');
-    ctx.clearRect(0, 0, overlay.width, overlay.height);
-  }
+function resetAll() {
+  $('fab').className = 'start'; $('fab').textContent = '▶';
+  $('fab-label').textContent = '开始检测';
+  $('badge').textContent = '待机'; $('badge').className = 'badge badge-off';
+  $('placeholder').style.display = '';
+  $('stats-pill').classList.add('hidden');
+  $('det-num').textContent = '0'; $('sv-fps').textContent = '0 fps';
+  $('bottom-sheet').classList.remove('collapsed');
+  STATE.immersive = false;
+  $('top-bar').classList.remove('hidden');
+  $('btn-immersive').style.background = '';
+  const ov = $('box-overlay');
+  if (ov) ov.getContext('2d').clearRect(0,0,ov.width,ov.height);
 }
 </script>
 </body>
