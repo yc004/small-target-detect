@@ -119,40 +119,35 @@ FRONTEND_HTML = """<!DOCTYPE html>
                    text-overflow: ellipsis; white-space: nowrap; }
 
   /* ════════════════════════════════════════════════════════════════════
-     Landscape / narrow-height screens (phones rotated)
+     Landscape / narrow-height screens — compact sizing only
      ════════════════════════════════════════════════════════════════════ */
   @media (max-height: 500px) {
-    #app { position: relative; }
-
-    /* Header: thin semi-transparent overlay at top, auto-hide */
-    #header { position: absolute; top: 0; left: 0; right: 0;
-              background: linear-gradient(rgba(0,0,0,.7), transparent);
-              border-bottom: none; padding: 4px 8px; opacity: 0;
-              transition: opacity .3s; }
-    #header:hover, #header:focus-within,
-    #app.show-ui #header { opacity: 1; }
+    #header { padding: 3px 8px; }
     #header h1 { font-size: 12px; }
+    #status { font-size: 10px; padding: 1px 6px; }
 
-    /* Video fills entire screen */
-    #video-container { position: absolute; inset: 0; }
+    #controls { padding: 4px 8px; gap: 4px; }
+    button { padding: 6px 10px; font-size: 12px; }
+    select { padding: 6px 8px; font-size: 12px; max-width: 90px; }
+    #fps { font-size: 11px; }
 
-    /* Controls: floating pill at bottom, auto-hide */
-    #controls { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
-                border-radius: 99px; background: rgba(15,23,42,.85);
-                backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-                border: 1px solid rgba(255,255,255,.1);
-                padding: 6px 14px; gap: 4px;
-                opacity: 0; transition: opacity .3s; }
-    #controls:hover, #controls:focus-within,
-    #app.show-ui #controls { opacity: 1; }
-    button { padding: 7px 12px; font-size: 12px; border-radius: 99px; }
-    select { padding: 7px 10px; font-size: 12px; max-width: 100px;
-             border-radius: 99px; background: rgba(255,255,255,.08); }
-    #fps { font-size: 11px; margin-left: 4px; }
-
-    /* Stats: more compact */
-    #stats-overlay { top: 4px; left: 4px; font-size: 10px; padding: 3px 6px; }
+    #stats-overlay { top: 3px; left: 3px; font-size: 10px; padding: 2px 5px; }
   }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Immersive mode — hide header & controls (toggled by user)
+     ════════════════════════════════════════════════════════════════════ */
+  #app.immersive #header,
+  #app.immersive #controls { opacity: 0; pointer-events: none; }
+  #app.immersive #header:hover,
+  #app.immersive #controls:hover { opacity: 1; pointer-events: auto; }
+
+  /* Fullscreen toggle button */
+  #btn-fullscreen { background: transparent; border: 1px solid #475569;
+                    color: #94a3b8; padding: 6px 10px; font-size: 12px;
+                    border-radius: 99px; }
+  #btn-fullscreen.active { background: #2563eb; border-color: #2563eb;
+                           color: #fff; }
 
   /* ════════════════════════════════════════════════════════════════════
      Very narrow screens (phones in portrait)
@@ -168,7 +163,7 @@ FRONTEND_HTML = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div id="app" class="show-ui">
+<div id="app">
   <div id="header">
     <h1>🚦 小目标交通标志实时检测</h1>
     <span id="status" class="disconnected">未连接</span>
@@ -185,6 +180,7 @@ FRONTEND_HTML = """<!DOCTYPE html>
     <select id="camera-select"></select>
     <button id="btn-start" onclick="startDetection()">▶ 开始检测</button>
     <button id="btn-stop" onclick="stopDetection()" disabled>⏹ 停止</button>
+    <button id="btn-fullscreen" onclick="toggleImmersive()">⊡ 全屏</button>
     <span id="fps">FPS: --</span>
   </div>
 </div>
@@ -204,22 +200,19 @@ const STATE = {
 
 const $ = id => document.getElementById(id);
 
-// ── Tap-to-toggle UI (landscape fullscreen mode) ──────────────────────
-let _uiTimeout = null;
-function showUI() {
-  $('app').classList.add('show-ui');
-  if (_uiTimeout) clearTimeout(_uiTimeout);
-  // Only auto-hide when detection is running
-  if (STATE.running) {
-    _uiTimeout = setTimeout(() => $('app').classList.remove('show-ui'), 4000);
+// ── Immersive mode toggle ──────────────────────────────────────────────
+function toggleImmersive() {
+  const app = $('app');
+  app.classList.toggle('immersive');
+  const btn = $('btn-fullscreen');
+  if (app.classList.contains('immersive')) {
+    btn.textContent = '⊡ 退出全屏';
+    btn.classList.add('active');
+  } else {
+    btn.textContent = '⊡ 全屏';
+    btn.classList.remove('active');
   }
 }
-function hideUI() {
-  if (_uiTimeout) clearTimeout(_uiTimeout);
-  $('app').classList.remove('show-ui');
-}
-$('video-container').addEventListener('click', showUI);
-$('video-container').addEventListener('touchstart', showUI, {passive: true});
 
 // ── Camera enumeration ────────────────────────────────────────────────
 async function listCameras() {
@@ -286,7 +279,6 @@ async function startDetection() {
     STATE.running = true;
     STATE.frameCount = 0;
     STATE.fpsTimer = performance.now();
-    showUI();  // flash UI, will auto-hide after 4s
     setupVideoPipeline();
     sendLoop();
   };
@@ -418,7 +410,6 @@ function stopDetection() {
   const video = $('live-video');
   if (video) video.srcObject = null;
   resetUI();
-  showUI();   // re-show UI (no auto-hide since STATE.running is now false)
 }
 
 function resetUI() {
@@ -427,6 +418,10 @@ function resetUI() {
   $('placeholder').style.display = 'block';
   $('stats-overlay').textContent = '';
   $('fps').textContent = 'FPS: --';
+  // Exit immersive mode
+  $('app').classList.remove('immersive');
+  $('btn-fullscreen').textContent = '⊡ 全屏';
+  $('btn-fullscreen').classList.remove('active');
   // Clear overlay canvas
   const overlay = $('box-overlay');
   if (overlay) {
