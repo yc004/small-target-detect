@@ -44,3 +44,4 @@ data/tt100k_2021/
 
 # SSL certificates (auto-generated)
 .certs/
+small_target_detect.zip

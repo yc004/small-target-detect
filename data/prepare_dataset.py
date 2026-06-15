@@ -30,9 +30,9 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import cv2
 import numpy as np
 import yaml
+from PIL import Image
 from tqdm import tqdm
 
 logging.basicConfig(
@@ -565,14 +565,16 @@ def prepare_dataset(
             if not dst_path.exists():
                 shutil.copy2(src_path, dst_path)
 
-            # Read image dimensions
-            img = cv2.imread(str(src_path))
-            if img is None:
-                img = cv2.imread(str(dst_path))
-            if img is not None:
-                h, w = img.shape[:2]
+            # Read image dimensions (use PIL, already a dependency)
+            w, h = DEFAULT_IMG_SIZE
+            for try_path in (src_path, dst_path):
+                try:
+                    with Image.open(try_path) as im:
+                        w, h = im.size
+                    break
+                except Exception:
+                    continue
             else:
-                w, h = DEFAULT_IMG_SIZE
                 logger.warning(
                     f"Could not read {name}, using default size {w}×{h}"
                 )

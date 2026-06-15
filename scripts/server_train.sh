@@ -185,46 +185,55 @@ if $SKIP_ENV; then
 else
     step "Step 2/4: Checking Python dependencies (excluding torch)"
 
+    # (module_name, pip_package, optional_fix_hint)
     REQUIRED_PKGS=(
-        "ultralytics"
-        "opencv-python"
-        "albumentations"
-        "pycocotools"
-        "numpy"
-        "matplotlib"
-        "seaborn"
-        "pyyaml"
-        "tqdm"
-        "pillow"
+        "ultralytics:ultralytics"
+        "cv2:opencv-python-headless"
+        "albumentations:albumentations"
+        "pycocotools:pycocotools"
+        "numpy:numpy"
+        "matplotlib:matplotlib"
+        "seaborn:seaborn"
+        "yaml:pyyaml"
+        "tqdm:tqdm"
+        "PIL:pillow"
     )
 
     MISSING=()
-    for pkg in "${REQUIRED_PKGS[@]}"; do
-        if python3 -c "import ${pkg//-/_}" 2>/dev/null; then
+    MISSING_HINT=()
+    for entry in "${REQUIRED_PKGS[@]}"; do
+        mod="${entry%%:*}"
+        pkg="${entry##*:}"
+        if python3 -c "import $mod" 2>/dev/null; then
             :
         else
-            # Try alternate import names
-            ok=false
-            for alt in "${pkg//-/_}" "cv2" "PIL" "yaml"; do
-                if python3 -c "import $alt" 2>/dev/null; then ok=true; break; fi
-            done
-            if ! $ok; then
-                MISSING+=("$pkg")
-            fi
+            MISSING+=("$pkg")
+            MISSING_HINT+=("$mod→$pkg")
         fi
     done
 
     if [ ${#MISSING[@]} -gt 0 ]; then
-        log "  ⚠️  Missing packages: ${MISSING[*]}"
-        log "  Installing with pip ..."
+        log "  ⚠️  Missing packages: ${MISSING_HINT[*]}"
+
+        # Special handling for opencv: two variants conflict
+        if [[ "${MISSING[*]}" =~ opencv ]]; then
+            log "  🔧 opencv conflict? Uninstalling all variants first ..."
+            pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python 2>/dev/null || true
+        fi
+
+        log "  Installing: ${MISSING[*]}"
         pip install "${MISSING[@]}" 2>&1 | tail -5
         log "  ✓ Packages installed"
     else
         log "  ✓ All required packages present"
     fi
 
-    # Verify ultralytics can import YOLO
-    python3 -c "from ultralytics import YOLO; print('  ✓ ultralytics OK')"
+    # Quick verify
+    python3 -c "
+import cv2; print(f'  ✓ cv2 {cv2.__version__}')
+from ultralytics import YOLO; print('  ✓ ultralytics OK')
+from PIL import Image; print('  ✓ PIL OK')
+"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
