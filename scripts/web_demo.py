@@ -213,7 +213,7 @@ async function startDetection() {
   };
 
   STATE.ws.onmessage = (event) => {
-    drawResults(JSON.parse(event.data));
+    STATE.latestDetections = JSON.parse(event.data);
   };
 
   STATE.ws.onclose = () => {
@@ -244,11 +244,15 @@ function setupVideoPipeline() {
     canvas.height = video.videoHeight;
   });
 
-  // Draw video frame onto canvas each animation frame
+  // Draw video frame + detection boxes each animation frame
   function drawVideo() {
     if (!STATE.running) return;
     if (video.readyState >= video.HAVE_CURRENT_DATA) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      // Draw stored detection results on top of video frame
+      if (STATE.latestDetections) {
+        drawBoxes(ctx, canvas.width, canvas.height, STATE.latestDetections);
+      }
     }
     requestAnimationFrame(drawVideo);
   }
@@ -290,42 +294,37 @@ setInterval(() => {
   }
 }, 2000);
 
-// ── Draw detection results ─────────────────────────────────────────────
+// ── Draw detection boxes (called from animation loop) ─────────────────
 const COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6',
                 '#8b5cf6','#ec4899','#06b6d4','#84cc16','#f43f5e'];
 
-function drawResults(data) {
-  const canvas = $('canvas');
-  const ctx = canvas.getContext('2d');
-  const scaleX = canvas.width;
-  const scaleY = canvas.height;
-
+function drawBoxes(ctx, w, h, data) {
   const detections = data.detections || [];
-  const serverFps = data.server_fps || 0;
 
+  // Update stats overlay
   $('stats-overlay').textContent =
-    `服务端 FPS: ${serverFps.toFixed(1)}  |  检出: ${detections.length} 个目标`;
+    `服务端 FPS: ${(data.server_fps || 0).toFixed(1)}  |  检出: ${detections.length} 个目标`;
 
   for (const det of detections) {
     const [x1, y1, x2, y2] = det.bbox;
     const color = COLORS[det.class_id % COLORS.length];
 
-    // Box
+    // Bounding box
     ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(2, canvas.width / 400);
-    ctx.strokeRect(x1 * scaleX, y1 * scaleY,
-                   (x2 - x1) * scaleX, (y2 - y1) * scaleY);
+    ctx.lineWidth = Math.max(2, w / 400);
+    ctx.strokeRect(x1 * w, y1 * h, (x2 - x1) * w, (y2 - y1) * h);
 
-    // Label background
+    // Label
     const label = `${det.name} ${(det.conf * 100).toFixed(0)}%`;
-    ctx.font = `${Math.max(12, canvas.width / 50)}px system-ui, sans-serif`;
+    const fontSize = Math.max(12, w / 50);
+    ctx.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
     const metrics = ctx.measureText(label);
-    const lx = x1 * scaleX;
-    const ly = Math.max(0, y1 * scaleY - 20);
+    const lx = x1 * w;
+    const ly = Math.max(0, y1 * h - fontSize * 1.6);
     ctx.fillStyle = color;
-    ctx.fillRect(lx, ly, metrics.width + 8, 20);
+    ctx.fillRect(lx, ly, metrics.width + 8, fontSize * 1.6);
     ctx.fillStyle = '#fff';
-    ctx.fillText(label, lx + 4, ly + 14);
+    ctx.fillText(label, lx + 4, ly + fontSize * 1.1);
   }
 }
 
