@@ -213,7 +213,16 @@ async function startDetection() {
   };
 
   STATE.ws.onmessage = (event) => {
-    STATE.latestDetections = JSON.parse(event.data);
+    const data = JSON.parse(event.data);
+    // Always update stats overlay immediately
+    $('stats-overlay').textContent =
+      `服务端 FPS: ${(data.server_fps || 0).toFixed(1)}  |  检出: ${(data.detections || []).length} 个目标`;
+    // Keep last known boxes — only clear if empty after persistent expiry
+    if (data.detections && data.detections.length > 0) {
+      STATE.persistentDetections = data;
+      STATE.lastBoxTime = performance.now();
+    }
+    // If empty, let old boxes stay for HOLD_DURATION before clearing
   };
 
   STATE.ws.onclose = () => {
@@ -244,14 +253,20 @@ function setupVideoPipeline() {
     canvas.height = video.videoHeight;
   });
 
-  // Draw video frame + detection boxes each animation frame
+  // Draw video frame + persistent detection boxes each animation frame
+  const HOLD_DURATION = 800;  // ms to keep old boxes after target disappears
   function drawVideo() {
     if (!STATE.running) return;
     if (video.readyState >= video.HAVE_CURRENT_DATA) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      // Draw stored detection results on top of video frame
-      if (STATE.latestDetections) {
-        drawBoxes(ctx, canvas.width, canvas.height, STATE.latestDetections);
+      // Draw last known boxes — they persist between server responses
+      if (STATE.persistentDetections) {
+        const age = performance.now() - (STATE.lastBoxTime || 0);
+        if (age < HOLD_DURATION) {
+          drawBoxes(ctx, canvas.width, canvas.height, STATE.persistentDetections);
+        } else {
+          STATE.persistentDetections = null;
+        }
       }
     }
     requestAnimationFrame(drawVideo);
@@ -300,11 +315,6 @@ const COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6',
 
 function drawBoxes(ctx, w, h, data) {
   const detections = data.detections || [];
-
-  // Update stats overlay
-  $('stats-overlay').textContent =
-    `服务端 FPS: ${(data.server_fps || 0).toFixed(1)}  |  检出: ${detections.length} 个目标`;
-
   for (const det of detections) {
     const [x1, y1, x2, y2] = det.bbox;
     const color = COLORS[det.class_id % COLORS.length];
@@ -345,6 +355,8 @@ function resetUI() {
   $('placeholder').style.display = 'block';
   $('stats-overlay').textContent = '';
   $('fps').textContent = 'FPS: --';
+  STATE.persistentDetections = null;
+  STATE.lastBoxTime = 0;
   // Clear canvas
   const ctx = $('canvas').getContext('2d');
   ctx.clearRect(0, 0, $('canvas').width, $('canvas').height);
