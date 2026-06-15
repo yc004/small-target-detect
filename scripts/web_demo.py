@@ -402,15 +402,28 @@ function setupVideo() {
   const v = $('live-video'), ov = $('box-overlay');
   v.srcObject = STATE.stream; v.playsInline = true; v.muted = true;
   v.play().catch(e => console.warn(e));
-  v.addEventListener('loadedmetadata', () => {
-    ov.width = v.videoWidth; ov.height = v.videoHeight;
-  });
+
+  // Sync overlay canvas to VIDEO CONTAINER size (not video resolution)
+  // because object-fit:contain creates letterboxing that we account for in drawBoxes
+  function syncOverlaySize() {
+    const rect = ov.parentElement.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      ov.width = rect.width;
+      ov.height = rect.height;
+    }
+  }
+  v.addEventListener('loadedmetadata', syncOverlaySize);
+  v.addEventListener('play', syncOverlaySize);
+  window.addEventListener('resize', syncOverlaySize);
+  window.addEventListener('orientationchange', () => setTimeout(syncOverlaySize, 200));
+  syncOverlaySize();
+
   STATE.videoEl = v; STATE.overlayEl = ov;
   STATE.overlayCtx = ov.getContext('2d');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Send loop
+// Send loop — capture only the video content area (crop letterboxing)
 // ═══════════════════════════════════════════════════════════════════════
 let _sendTimer = null;
 function sendLoop() {
@@ -419,14 +432,19 @@ function sendLoop() {
     if (!STATE.running || STATE.ws?.readyState!==WebSocket.OPEN) return;
     const v = STATE.videoEl;
     if (!v || v.readyState < v.HAVE_CURRENT_DATA) return;
+
+    const vw = v.videoWidth, vh = v.videoHeight;
+    if (!vw || !vh) return;
+
+    // Capture video at its native resolution (no letterboxing)
     const c = document.createElement('canvas');
-    c.width=v.videoWidth; c.height=v.videoHeight;
-    c.getContext('2d').drawImage(v,0,0);
+    c.width = vw; c.height = vh;
+    c.getContext('2d').drawImage(v, 0, 0, vw, vh);
     c.toBlob(b => {
       if (b && STATE.ws?.readyState===WebSocket.OPEN) {
         STATE.ws.send(b); STATE.frameCount++;
       }
-    },'image/jpeg',0.75);
+    }, 'image/jpeg', 0.75);
   }, STATE.frameInterval);
 }
 
@@ -443,26 +461,59 @@ setInterval(() => {
 },2000);
 
 // ═══════════════════════════════════════════════════════════════════════
-// Draw boxes
+// Draw boxes — account for object-fit:contain letterboxing
 // ═══════════════════════════════════════════════════════════════════════
 const COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6',
                 '#8b5cf6','#ec4899','#06b6d4','#84cc16','#f43f5e'];
 
-function drawBoxes(ctx, w, h, data) {
+function getVideoRect(canvasW, canvasH) {
+  const v = STATE.videoEl;
+  if (!v || !v.videoWidth) return {x:0, y:0, w:canvasW, h:canvasH};
+
+  const vidAspect = v.videoWidth / v.videoHeight;
+  const boxAspect = canvasW / canvasH;
+
+  let rw, rh, rx, ry;
+  if (vidAspect > boxAspect) {
+    // Video is wider than container → letterbox top/bottom
+    rw = canvasW;
+    rh = canvasW / vidAspect;
+    rx = 0;
+    ry = (canvasH - rh) / 2;
+  } else {
+    // Video is taller than container → letterbox left/right
+    rh = canvasH;
+    rw = canvasH * vidAspect;
+    rx = (canvasW - rw) / 2;
+    ry = 0;
+  }
+  return {x: rx, y: ry, w: rw, h: rh};
+}
+
+function drawBoxes(ctx, canvasW, canvasH, data) {
+  const r = getVideoRect(canvasW, canvasH);
+
   for (const d of (data.detections||[])) {
     const [x1,y1,x2,y2] = d.bbox;
     const c = COLORS[d.class_id % COLORS.length];
+
+    // Map normalized [0,1] coordinates to actual video render rect
+    const bx = r.x + x1 * r.w;
+    const by = r.y + y1 * r.h;
+    const bw = (x2 - x1) * r.w;
+    const bh = (y2 - y1) * r.h;
+
     ctx.strokeStyle = c;
-    ctx.lineWidth = Math.max(2.5, w/350);
-    ctx.strokeRect(x1*w, y1*h, (x2-x1)*w, (y2-y1)*h);
+    ctx.lineWidth = Math.max(2.5, r.w / 350);
+    ctx.strokeRect(bx, by, bw, bh);
 
     const label = `${d.name} ${(d.conf*100)|0}%`;
-    const fs = Math.max(13, w/45);
+    const fs = Math.max(13, r.w / 45);
     ctx.font = `600 ${fs}px -apple-system, sans-serif`;
     const m = ctx.measureText(label);
-    const lx = x1*w, ly = Math.max(0, y1*h - fs*1.7);
-    ctx.fillStyle = c; ctx.fillRect(lx, ly, m.width+8, fs*1.7);
-    ctx.fillStyle = '#fff'; ctx.fillText(label, lx+4, ly+fs*1.2);
+    const lx = bx, ly = Math.max(0, by - fs * 1.7);
+    ctx.fillStyle = c; ctx.fillRect(lx, ly, m.width + 8, fs * 1.7);
+    ctx.fillStyle = '#fff'; ctx.fillText(label, lx + 4, ly + fs * 1.2);
   }
 }
 
