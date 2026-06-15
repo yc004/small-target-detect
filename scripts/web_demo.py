@@ -11,18 +11,26 @@ Usage:
     python scripts/web_demo.py --stage stage2_p2         # use specific stage
     python scripts/web_demo.py --weights best.pt --port 8080
     python scripts/web_demo.py --device mps --conf 0.3
+    python scripts/web_demo.py --no-ssl                 # localhost dev mode (no HTTPS)
 
-Then open http://<server-ip>:8000 on any device with a camera.
+Then open the printed URL on any device with a camera.
+NOTE: Camera access requires HTTPS (except on localhost). The server
+auto-generates a self-signed certificate. Accept the browser warning.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime
 import io
+import ipaddress
 import json
 import logging
+import socket
+import ssl
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -449,6 +457,61 @@ async def websocket_endpoint(ws: WebSocket):
 # CLI Entry Point
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _generate_ssl_cert(cert_file: Path, key_file: Path) -> None:
+    """Generate a self-signed SSL certificate valid for local LAN IPs."""
+    from cryptography import x509
+    from cryptography.x509.oid import NameOID
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    # Generate private key
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    # Get local IPs for SAN
+    hostname = socket.gethostname()
+    try:
+        local_ip = socket.gethostbyname(hostname)
+    except Exception:
+        local_ip = "127.0.0.1"
+
+    subject = issuer = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, local_ip),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "WebDemo"),
+    ])
+
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime.now(datetime.UTC))
+        .not_valid_after(datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365))
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                x509.DNSName(local_ip),
+                x509.IPAddress(ipaddress.IPv4Address(local_ip)),
+            ]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+
+    # Write key
+    key_file.write_bytes(key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ))
+
+    # Write cert
+    cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+
+    logger.info(f"SSL certificate generated: {cert_file}")
+
+
 def find_best_pt(stage: str) -> Path | None:
     """Find best.pt for a given stage name."""
     p = PROJECT_ROOT / "experiments" / stage / "train" / "weights" / "best.pt"
@@ -493,6 +556,10 @@ def main():
         "--iou", type=float, default=0.5,
         help="IoU threshold for NMS. Default: 0.5",
     )
+    parser.add_argument(
+        "--no-ssl", action="store_true",
+        help="Disable HTTPS (only safe for localhost dev; cameras will NOT work on remote devices)",
+    )
 
     args = parser.parse_args()
 
@@ -526,24 +593,62 @@ def main():
 
     logger.info(f"Model ready. {MODEL.names}")
 
-    # ── Print access info ────────────────────────────────────────────
-    import socket
+    # ── SSL certificate ──────────────────────────────────────────────
+    ssl_certfile = None
+    ssl_keyfile = None
+    use_ssl = not args.no_ssl
+
+    if use_ssl:
+        cert_dir = PROJECT_ROOT / ".certs"
+        cert_dir.mkdir(exist_ok=True)
+        cert_file = cert_dir / "webdemo.pem"
+        key_file = cert_dir / "webdemo.key"
+
+        if not (cert_file.exists() and key_file.exists()):
+            logger.info("Generating self-signed SSL certificate ...")
+            try:
+                _generate_ssl_cert(cert_file, key_file)
+                cert_file.chmod(0o600)
+                key_file.chmod(0o600)
+            except Exception as e:
+                logger.error(f"Failed to generate SSL cert: {e}")
+                logger.info("Falling back to HTTP. Camera will only work on localhost.")
+                use_ssl = False
+
+        if use_ssl:
+            ssl_certfile = str(cert_file)
+            ssl_keyfile = str(key_file)
+
+    # ── Get local IP ─────────────────────────────────────────────────
     hostname = socket.gethostname()
     try:
         local_ip = socket.gethostbyname(hostname)
     except Exception:
         local_ip = "127.0.0.1"
 
+    scheme = "https" if use_ssl else "http"
+    protocol = "wss" if use_ssl else "ws"
+
+    # Update the frontend WebSocket URL to use the correct protocol
+    global FRONTEND_HTML
+    FRONTEND_HTML = FRONTEND_HTML.replace(
+        "const proto = location.protocol === 'https:' ? 'wss' : 'ws';",
+        f"const proto = '{protocol}';"
+    )
+
     print()
     print("=" * 60)
     print("  🚦 Web Demo Server Ready")
     print("=" * 60)
-    print(f"  Local:    http://localhost:{args.port}")
+    print(f"  Local:    {scheme}://localhost:{args.port}")
     if args.host == "0.0.0.0":
-        print(f"  Network:  http://{local_ip}:{args.port}")
+        print(f"  Network:  {scheme}://{local_ip}:{args.port}")
     print()
-    print("  Open this URL on any device with a camera.")
-    print("  Phone/tablet: use the 'Network' address.")
+    print("  Open the "+("Network" if args.host == "0.0.0.0" else "Local")+" URL on any device with a camera.")
+    if use_ssl:
+        print("  ⚠️  Accept the self-signed certificate warning in your browser.")
+    else:
+        print("  ⚠️  HTTP mode — camera only works on localhost, NOT on phones/tablets.")
     print("=" * 60)
     print()
 
@@ -552,6 +657,8 @@ def main():
         app,
         host=args.host,
         port=args.port,
+        ssl_certfile=ssl_certfile,
+        ssl_keyfile=ssl_keyfile,
         log_level="warning",
         ws_ping_interval=30,
         ws_ping_timeout=10,

@@ -41,3 +41,6 @@ data/Dataset-TT100K
 data/processed/dataset.yaml
 data/TT100K_raw
 data/tt100k_2021/
+
+# SSL certificates (auto-generated)
+.certs/
