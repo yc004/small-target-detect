@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════════
+# Linux Server One-Click Training Pipeline
+# ═══════════════════════════════════════════════════════════════════════════════
+# Usage:
+#   bash scripts/server_train.sh                           # train stage1 (default)
+#   bash scripts/server_train.sh stage2_p2                 # train specified stage
+#   bash scripts/server_train.sh stage3_arf_head --epochs 50  # custom epochs
+#   bash scripts/server_train.sh --skip-data                # skip dataset prep
+#   bash scripts/server_train.sh --skip-env                 # skip env check
+#
+# Env vars (optional):
+#   CONDA_ENV=myenv   bash scripts/server_train.sh          # custom conda env
+# ═══════════════════════════════════════════════════════════════════════════════
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+SCRIPT_START=$(date +%s)
+
+# ─── Config ──────────────────────────────────────────────────────────────────
+STAGE="${1:-stage1_baseline}"             # training stage name
+CONDA_ENV="${CONDA_ENV:-base}"            # conda environment name
+DATASET_PATH="${TT100K_PATH:-/public/data/image/TT100K}"
+OUTPUT_DIR="data/processed"
+MNT_DIR="/mnt"
+BATCH_SIZE="${BATCH_SIZE:-8}"
+IMG_SIZE="${IMG_SIZE:-640}"
+EPOCHS="${EPOCHS:-100}"
+DEVICE="${DEVICE:-0}"
+SKIP_DATA=false
+SKIP_ENV=false
+
+# Parse optional flags
+for arg in "$@"; do
+    case "$arg" in
+        --skip-data) SKIP_DATA=true ;;
+        --skip-env)  SKIP_ENV=true  ;;
+        --epochs)    EPOCHS="$2"    ;;
+        --batch)     BATCH_SIZE="$2" ;;
+        --imgsz)     IMG_SIZE="$2"   ;;
+        --device)    DEVICE="$2"     ;;
+    esac
+done
+
+# Stage → config mapping
+declare -A STAGE_CONFIG
+STAGE_CONFIG[stage1_baseline]="configs/stage1_baseline.yaml"
+STAGE_CONFIG[stage2_p2]="configs/stage2_p2.yaml"
+STAGE_CONFIG[stage3_arf_head]="configs/stage3_arf_head.yaml"
+STAGE_CONFIG[stage4_bcem]="configs/stage4_bcem.yaml"
+STAGE_CONFIG[stage5_hjloss]="configs/stage5_hjloss.yaml"
+STAGE_CONFIG[stage6_full]="configs/stage6_full.yaml"
+
+CONFIG="${STAGE_CONFIG[$STAGE]:-}"
+if [ -z "$CONFIG" ]; then
+    echo "❌ Unknown stage: $STAGE"
+    echo "   Valid stages: ${!STAGE_CONFIG[*]}"
+    exit 1
+fi
+if [ ! -f "$CONFIG" ]; then
+    echo "❌ Config file not found: $CONFIG"
+    exit 1
+fi
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+EXPERIMENT_DIR="experiments/${STAGE}"
+
+log()  { echo -e "[$(date '+%H:%M:%S')] $*"; }
+step() { echo ""; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; echo "  📌 $*"; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; }
+
+# ─── Sanity checks ───────────────────────────────────────────────────────────
+log "🔍 Pre-flight checks ..."
+
+if [ ! -d "$DATASET_PATH" ]; then
+    echo "❌ Dataset path not found: $DATASET_PATH"
+    exit 1
+fi
+
+# Activate conda
+if command -v conda &>/dev/null; then
+    # Source conda.sh if available (needed in non-interactive shells)
+    CONDA_BASE=$(conda info --base 2>/dev/null || echo "")
+    if [ -n "$CONDA_BASE" ] && [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
+        source "$CONDA_BASE/etc/profile.d/conda.sh"
+    fi
+    conda activate "$CONDA_ENV" 2>/dev/null || {
+        echo "⚠️  Could not activate conda env '$CONDA_ENV'. Continuing with current Python."
+    }
+else
+    echo "⚠️  conda not found. Continuing with system Python."
+fi
+
+log "  Python:  $(python3 --version 2>&1)"
+log "  CUDA:    $(python3 -c 'import torch; print(f"torch {torch.__version__}, CUDA available: {torch.cuda.is_available()}, devices: {torch.cuda.device_count()}")' 2>&1 || echo 'N/A')"
+log "  Stage:   $STAGE  →  $CONFIG"
+log "  Device:  $DEVICE"
+log "  Epochs:  $EPOCHS  |  Batch: $BATCH_SIZE  |  ImgSz: $IMG_SIZE"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 1: Prepare Dataset
+# ═══════════════════════════════════════════════════════════════════════════════
+if $SKIP_DATA; then
+    log "⏭  Step 1: Dataset preparation SKIPPED (--skip-data)"
+else
+    step "Step 1/4: Preparing dataset from $DATASET_PATH"
+
+    if [ -f "$OUTPUT_DIR/dataset.yaml" ]; then
+        log "  ✓ dataset.yaml already exists — skipping preparation."
+        log "    To force re-prepare: rm -rf $OUTPUT_DIR"
+    else
+        log "  Scanning $DATASET_PATH ..."
+
+        # Detect dataset format
+        YOLO_ZIP=$(find "$DATASET_PATH" -maxdepth 3 \( -name "*YOLO*.zip" -o -name "*yolo*.zip" \) 2>/dev/null | head -1 || true)
+        ANN_FILE=$(find "$DATASET_PATH" -maxdepth 3 -name "annotations_all.json" 2>/dev/null | head -1 || true)
+        [ -z "$ANN_FILE" ] && ANN_FILE=$(find "$DATASET_PATH" -maxdepth 3 -name "annotations.json" 2>/dev/null | head -1 || true)
+
+        if [ -n "$YOLO_ZIP" ] && [ -f "$YOLO_ZIP" ]; then
+            log "  📦 Found YOLO-format ZIP, extracting ..."
+            python3 data/extract_dataset.py \
+                --zip_path "$YOLO_ZIP" --output_dir "$OUTPUT_DIR"
+
+        elif [ -n "$ANN_FILE" ] && [ -f "$ANN_FILE" ]; then
+            log "  📋 Found $ANN_FILE, converting to YOLO format ..."
+            python3 data/prepare_dataset.py \
+                --data_dir "$(dirname "$ANN_FILE")" \
+                --ann_file "$ANN_FILE" \
+                --output_dir "$OUTPUT_DIR"
+
+        elif [ -d "$DATASET_PATH/images" ] && [ -d "$DATASET_PATH/labels" ]; then
+            log "  📁 YOLO directory structure detected, linking ..."
+            mkdir -p "$OUTPUT_DIR/images" "$OUTPUT_DIR/labels"
+            cp -rn "$DATASET_PATH/images/"* "$OUTPUT_DIR/images/" 2>/dev/null || true
+            cp -rn "$DATASET_PATH/labels/"* "$OUTPUT_DIR/labels/" 2>/dev/null || true
+            python3 -c "
+import yaml
+from pathlib import Path
+out = Path('$OUTPUT_DIR')
+test_dir = out / 'images' / 'test'
+test = str(test_dir) if test_dir.exists() else str(out / 'images' / 'val')
+config = {'path': str(out.absolute()), 'train': str(out / 'images' / 'train'),
+          'val': str(out / 'images' / 'val'), 'test': test, 'nc': 5,
+          'names': ['speed_limit_5','speed_limit_30','speed_limit_40','no_entry','no_pedestrians']}
+with open(out / 'dataset.yaml', 'w') as f:
+    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+print('  ✓ dataset.yaml written')
+"
+        else
+            echo "❌ Cannot detect dataset format in $DATASET_PATH"
+            echo "   Expected: annotations_all.json, YOLO .zip, or images/ + labels/"
+            ls -l "$DATASET_PATH" 2>/dev/null | head -20
+            exit 1
+        fi
+
+        log "  ✓ Dataset prepared at $OUTPUT_DIR"
+    fi
+
+    # Quick stats
+    log "  Dataset statistics:"
+    python3 -c "
+from pathlib import Path
+out = Path('$OUTPUT_DIR')
+for split in ['train', 'val', 'test']:
+    img_dir = out / 'images' / split
+    if img_dir.exists():
+        n = len([f for f in img_dir.glob('*') if f.suffix in ('.jpg','.jpeg','.png')])
+        print(f'    {split}: {n} images')
+"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 2: Environment Check (skip torch)
+# ═══════════════════════════════════════════════════════════════════════════════
+if $SKIP_ENV; then
+    log "⏭  Step 2: Environment check SKIPPED (--skip-env)"
+else
+    step "Step 2/4: Checking Python dependencies (excluding torch)"
+
+    REQUIRED_PKGS=(
+        "ultralytics"
+        "opencv-python"
+        "albumentations"
+        "pycocotools"
+        "numpy"
+        "matplotlib"
+        "seaborn"
+        "pyyaml"
+        "tqdm"
+        "pillow"
+    )
+
+    MISSING=()
+    for pkg in "${REQUIRED_PKGS[@]}"; do
+        if python3 -c "import ${pkg//-/_}" 2>/dev/null; then
+            :
+        else
+            # Try alternate import names
+            ok=false
+            for alt in "${pkg//-/_}" "cv2" "PIL" "yaml"; do
+                if python3 -c "import $alt" 2>/dev/null; then ok=true; break; fi
+            done
+            if ! $ok; then
+                MISSING+=("$pkg")
+            fi
+        fi
+    done
+
+    if [ ${#MISSING[@]} -gt 0 ]; then
+        log "  ⚠️  Missing packages: ${MISSING[*]}"
+        log "  Installing with pip ..."
+        pip install "${MISSING[@]}" 2>&1 | tail -5
+        log "  ✓ Packages installed"
+    else
+        log "  ✓ All required packages present"
+    fi
+
+    # Verify ultralytics can import YOLO
+    python3 -c "from ultralytics import YOLO; print('  ✓ ultralytics OK')"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 3: Training
+# ═══════════════════════════════════════════════════════════════════════════════
+step "Step 3/4: Training — $STAGE"
+
+mkdir -p "$EXPERIMENT_DIR"
+
+log "  Config:   $CONFIG"
+log "  Epochs:   $EPOCHS"
+log "  Batch:    $BATCH_SIZE"
+log "  ImgSz:    $IMG_SIZE"
+log "  Device:   $DEVICE"
+log "  Log:      $EXPERIMENT_DIR/train_${TIMESTAMP}.log"
+echo ""
+
+TRAIN_START=$(date +%s)
+
+python3 scripts/train.py \
+    --config "$CONFIG" \
+    --epochs "$EPOCHS" \
+    --batch "$BATCH_SIZE" \
+    --imgsz "$IMG_SIZE" \
+    --device "$DEVICE" \
+    --project "$EXPERIMENT_DIR" \
+    --name train \
+    2>&1 | tee "$EXPERIMENT_DIR/train_${TIMESTAMP}.log"
+
+TRAIN_END=$(date +%s)
+TRAIN_MINS=$(( (TRAIN_END - TRAIN_START) / 60 ))
+
+BEST_PT="$EXPERIMENT_DIR/train/weights/best.pt"
+if [ -f "$BEST_PT" ]; then
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "  ✅ Training complete!  Duration: ${TRAIN_MINS} min"
+    log "  📦 Best model: $BEST_PT"
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+else
+    echo "❌ Training failed — best.pt not found."
+    echo "   Check log: $EXPERIMENT_DIR/train_${TIMESTAMP}.log"
+    exit 1
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 4: Copy results to /mnt
+# ═══════════════════════════════════════════════════════════════════════════════
+step "Step 4/4: Copying results to $MNT_DIR"
+
+MNT_DEST="$MNT_DIR/${STAGE}_${TIMESTAMP}"
+
+if [ ! -d "$MNT_DIR" ]; then
+    log "  ⚠️  $MNT_DIR does not exist — creating ..."
+    mkdir -p "$MNT_DIR" 2>/dev/null || {
+        echo "❌ Cannot create $MNT_DIR. Check permissions or mount status."
+        exit 1
+    }
+fi
+
+mkdir -p "$MNT_DEST"
+
+# Copy essential files only (skip intermediate epochs to save space)
+log "  Copying to $MNT_DEST ..."
+
+# Weights (best + last)
+cp -r "$EXPERIMENT_DIR/train/weights/best.pt" "$MNT_DEST/" 2>/dev/null || true
+cp -r "$EXPERIMENT_DIR/train/weights/last.pt" "$MNT_DEST/" 2>/dev/null || true
+
+# Training curves & plots
+for f in results.png results.csv confusion_matrix.png confusion_matrix_normalized.png \
+         BoxPR_curve.png BoxF1_curve.png BoxP_curve.png BoxR_curve.png \
+         labels.jpg args.yaml; do
+    cp "$EXPERIMENT_DIR/train/$f" "$MNT_DEST/" 2>/dev/null || true
+done
+
+# Validation batch samples
+mkdir -p "$MNT_DEST/val_samples"
+cp "$EXPERIMENT_DIR/train/val_batch0_pred.jpg" "$MNT_DEST/val_samples/" 2>/dev/null || true
+cp "$EXPERIMENT_DIR/train/val_batch1_pred.jpg" "$MNT_DEST/val_samples/" 2>/dev/null || true
+cp "$EXPERIMENT_DIR/train/val_batch2_pred.jpg" "$MNT_DEST/val_samples/" 2>/dev/null || true
+
+# Training log
+cp "$EXPERIMENT_DIR/train_${TIMESTAMP}.log" "$MNT_DEST/" 2>/dev/null || true
+
+# Write run metadata
+cat > "$MNT_DEST/run_info.txt" << EOF
+Stage:       $STAGE
+Config:      $CONFIG
+Timestamp:   $TIMESTAMP
+Epochs:      $EPOCHS
+Batch size:  $BATCH_SIZE
+Image size:  $IMG_SIZE
+Device:      $DEVICE
+Duration:    ${TRAIN_MINS} min
+Server:      $(hostname)
+Date:        $(date)
+EOF
+
+log "  ✓ Results copied to $MNT_DEST"
+log "  📁 Contents:"
+ls -lh "$MNT_DEST/" | tail -20
+
+# ─── Summary ──────────────────────────────────────────────────────────────────
+SCRIPT_END=$(date +%s)
+TOTAL_MINS=$(( (SCRIPT_END - SCRIPT_START) / 60 ))
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "  ✅ Pipeline complete!"
+echo "     Stage:       $STAGE"
+echo "     Total time:  ${TOTAL_MINS} min"
+echo "     Best model:  $BEST_PT"
+echo "     Results:     $MNT_DEST"
+echo "════════════════════════════════════════════════════════════"
+echo ""
