@@ -168,7 +168,7 @@ FRONTEND_HTML = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div id="app">
+<div id="app" class="show-ui">
   <div id="header">
     <h1>🚦 小目标交通标志实时检测</h1>
     <span id="status" class="disconnected">未连接</span>
@@ -209,12 +209,17 @@ let _uiTimeout = null;
 function showUI() {
   $('app').classList.add('show-ui');
   if (_uiTimeout) clearTimeout(_uiTimeout);
-  _uiTimeout = setTimeout(() => $('app').classList.remove('show-ui'), 4000);
+  // Only auto-hide when detection is running
+  if (STATE.running) {
+    _uiTimeout = setTimeout(() => $('app').classList.remove('show-ui'), 4000);
+  }
+}
+function hideUI() {
+  if (_uiTimeout) clearTimeout(_uiTimeout);
+  $('app').classList.remove('show-ui');
 }
 $('video-container').addEventListener('click', showUI);
 $('video-container').addEventListener('touchstart', showUI, {passive: true});
-// Auto-show on start
-showUI();
 
 // ── Camera enumeration ────────────────────────────────────────────────
 async function listCameras() {
@@ -281,6 +286,7 @@ async function startDetection() {
     STATE.running = true;
     STATE.frameCount = 0;
     STATE.fpsTimer = performance.now();
+    showUI();  // flash UI, will auto-hide after 4s
     setupVideoPipeline();
     sendLoop();
   };
@@ -412,6 +418,7 @@ function stopDetection() {
   const video = $('live-video');
   if (video) video.srcObject = null;
   resetUI();
+  showUI();   // re-show UI (no auto-hide since STATE.running is now false)
 }
 
 function resetUI() {
