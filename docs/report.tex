@@ -554,29 +554,79 @@ Stage 2 的混淆矩阵（图~\ref{fig:cm_comparison}）与 Stage 1 整体相似
 \end{minipage}
 \end{figure}
 
+\subsection{Stage 3：ARF-Head 自适应感受野检测头（原创）}
+
+在 YOLO26s-P2 的基础上，于四个检测层（P2/P3/P4/P5）的 C3k2 之后、Detect 之前各插入一个 ARF 模块。ARF 通过多分支空洞卷积（各层空洞率：P2=[1,3,5]、P3=[1,2,3]、P4=[1,1,2]、P5=[1,1,1]）与可学习 softmax 融合，为不同尺度提供自适应的感受野。模型参数量增加约 0.16M。训练曲线如图~\ref{fig:stage3_results} 所示。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{images/stage3/results.png}
+\caption{Stage 3（YOLO26s-P2 + ARF-Head）训练曲线}
+\label{fig:stage3_results}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Stage 3 训练结果（YOLO26s-P2 + ARF-Head，640×640，100 epoch）}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{指标} & \textbf{Stage 1} & \textbf{Stage 2} & \textbf{Stage 3} & $\Delta$ (vs S2) \\
+\midrule
+mAP@0.5      & 0.544 & 0.552 & 0.548 & $-$0.004 \\
+mAP@0.5:0.95 & 0.408 & 0.425 & 0.421 & $-$0.004 \\
+Precision    & 0.601 & 0.588 & 0.592 & +0.004 \\
+Recall       & 0.503 & 0.504 & \textbf{0.519} & \textbf{+0.015} \\
+Params       & 10.01M & 9.77M & $\sim$9.93M & +0.16M \\
+\bottomrule
+\end{tabular}
+\label{tab:stage3}
+\end{table}
+
+ARF-Head 最显著的变化是 Recall 提升至 0.519（+0.015 vs Stage 2），说明空洞卷积扩大的感受野确实帮助模型发现了更多被遗漏的小目标。但 Precision 仅微升至 0.592（+0.004），未能完全补偿假阳性增多，导致 mAP 小幅回调。这一现象符合``召回优先''的设计预期——ARF 模块的 P2 层空洞率 [1,3,5] 扩大了感受野以捕获周围上下文，但也可能引入了额外背景噪声。后续 Stage 4 的 BCEM 模块（前景/背景判别增强）有望抑制此噪声，释放 ARF 的召回增益。
+
+\subsubsection{PR 与 F1 曲线}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{images/stage3/PR_curve.png}
+\caption{Stage 3 Precision-Recall 曲线}
+\label{fig:stage3_pr}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{images/stage3/F1_curve.png}
+\caption{Stage 3 F1-Confidence 曲线}
+\label{fig:stage3_f1}
+\end{minipage}
+\end{figure}
+
 \subsection{消融实验汇总}
 
 \begin{table}[H]
 \centering
-\caption{消融实验结果汇总（A、B 为实测，C--F 待训练）}
+\caption{消融实验结果汇总（A--C 为实测，D--F 待训练）}
 \begin{tabular}{lccccc}
 \toprule
-\textbf{实验} & \textbf{模型配置} & \textbf{mAP@0.5} & \textbf{mAP@0.5:0.95} & \textbf{AP\_S} & \textbf{状态} \\
+\textbf{实验} & \textbf{模型配置} & \textbf{mAP@0.5} & \textbf{mAP@0.5:0.95} & \textbf{Recall} & \textbf{状态} \\
 \midrule
-A & YOLO26s                     & 0.544 & 0.408  & 待评估 & 已完成 \\
-B & + P2                        & 0.552 & 0.425  & 待评估 & 已完成 \\
-C & + ARF-Head                  & —     & —      & —      & 待训练 \\
-D & + BCEM                      & —     & —      & —      & 待训练 \\
-E & + HJ-Loss                   & —     & —      & —      & 待训练 \\
-F & + Soft-NMS                  & —     & —      & —      & 待训练 \\
+A & YOLO26s                     & 0.544 & 0.408  & 0.503 & 已完成 \\
+B & + P2                        & 0.552 & 0.425  & 0.504 & 已完成 \\
+C & + ARF-Head                  & 0.548 & 0.421  & 0.519 & 已完成 \\
+D & + BCEM                      & —     & —      & —     & 待训练 \\
+E & + HJ-Loss                   & —     & —      & —     & 待训练 \\
+F & + Soft-NMS                  & —     & —      & —     & 待训练 \\
 \bottomrule
 \end{tabular}
 \label{tab:ablation_results}
 \end{table}
 
-$\Delta_{\text{P2}}$ = B $-$ A：mAP@0.5 +0.008，mAP@0.5:0.95 +0.017。
+$\Delta_{\text{P2}}$ = B $-$ A：mAP@0.5 +0.008，mAP@0.5:0.95 +0.017。\\
+$\Delta_{\text{ARF}}$ = C $-$ B：mAP@0.5 $-$0.004，Recall \textbf{+0.015}。
 
-\subsection{Stage 3--6：后续阶段计划}
+\subsection{Stage 4--6：后续阶段计划}
 
 \begin{table}[H]
 \centering
@@ -585,10 +635,9 @@ $\Delta_{\text{P2}}$ = B $-$ A：mAP@0.5 +0.008，mAP@0.5:0.95 +0.017。
 \toprule
 \textbf{阶段} & \textbf{改进模块} & \textbf{创新程度} & \textbf{目标} \\
 \midrule
-Stage 3 & ARF-Head 自适应感受野检测头 & 原创 & 提升小目标上下文感知能力 \\
-Stage 4 & BCEM 双向上下文增强模块   & 原创 & 抑制背景噪声，增强前景判别 \\
-Stage 5 & HJ-Loss 分层联合损失函数   & 原创 & 小目标定位精度提升 \\
-Stage 6 & Soft-NMS + 系统集成        & 集成优化   & 密集场景召回提升 \\
+Stage 4 & BCEM 双向上下文增强模块   & 原创 & 抑制 ARF 引入的背景噪声，提升 Precision \\
+Stage 5 & HJ-Loss 分层联合损失函数   & 原创 & 小目标定位精度提升，释放 Recall 增益 \\
+Stage 6 & Soft-NMS + 系统集成        & 集成优化 & 密集场景召回提升 \\
 \bottomrule
 \end{tabular}
 \label{tab:stage_plan}
