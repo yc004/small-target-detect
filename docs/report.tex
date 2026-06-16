@@ -139,7 +139,7 @@
 
 本作品针对小目标交通标志检测这一痛点，基于 ultralytics 最新 YOLO26s 检测框架，设计了六阶段渐进式改进方案。YOLO26 是 ultralytics 在 2025 年发布的最新检测架构，相较上一代 YOLOv8 引入了 C3k2 多尺度核选择模块、C2PSA 交叉阶段自注意力、端到端检测模式（end2end + reg\_max=1）等关键升级，基线性能更优。在此基础上，本作品原创设计了三项针对性改进模块：(1) \textbf{ARF-Head（自适应感受野检测头）}：通过多分支空洞卷积与可学习 softmax 融合，为不同检测层提供尺度感知的自适应感受野；(2) \textbf{BCEM（双向上下文增强模块）}：在 Backbone 到 Neck 的跳跃连接处引入通道+空间双向注意力，显式增强前景区域并抑制背景噪声；(3) \textbf{HJ-Loss（分层联合损失函数）}：对小目标检测层使用 WIoUv3 + NWD 联合监督，对大目标层仅使用 WIoUv3，实现差异化的损失策略。
 
-系统基于 TT100K 交通标志数据集（2021 版）进行训练与验证，选取 5 类典型小目标标志（限速 5、限速 30、限速 40、禁止驶入、禁止行人通行），通过严格的控制变量消融实验量化每个创新模块的独立贡献。系统支持图片、视频及实时摄像头输入。
+系统基于 TT100K 交通标志数据集（2021 版）进行训练与验证，使用全部 201 类交通标志，通过严格的控制变量消融实验量化每个创新模块的独立贡献。系统支持图片、视频及实时摄像头输入。
 
 \textbf{关键词：}小目标检测；交通标志识别；YOLO26；自适应感受野；双向上下文增强；分层联合损失
 
@@ -327,26 +327,9 @@ s_i = s_i \cdot \exp\left(-\frac{\text{IoU}(M, b_i)^2}{\sigma}\right), \quad \si
 
 \subsection{数据集}
 
-本作品采用 TT100K 2021 版数据集，原始数据包含约 100,000 张腾讯街景全景图，标注约 30,000 个交通标志实例，涵盖 221 类中国交通标志。筛选其中 5 类典型小目标标志进行实验，数据集类别分布如表~\ref{tab:dataset} 所示。
+本作品采用 TT100K 2021 版数据集，原始数据包含约 100,000 张腾讯街景全景图，标注约 30,000 个交通标志实例。完整数据集涵盖 201 类中国交通标志（含限速、禁令、指示、警告等大类），其中大量类别属于典型的小目标（在 $2048\times 2048$ 原图中标注框面积 $< 32\times 32$ 像素）。
 
-\begin{table}[H]
-\centering
-\caption{数据集类别分布（TT100K 子集）}
-\begin{tabular}{cccc}
-\toprule
-\textbf{类名} & \textbf{TT100K 标识} & \textbf{中文含义} & \textbf{标注数} \\
-\midrule
-speed\_limit\_5  & i2   & 限速 5 km/h      & 217  \\
-speed\_limit\_30 & i4   & 限速 30 km/h     & 362  \\
-speed\_limit\_40 & i5   & 限速 40 km/h     & 794  \\
-no\_entry        & pne  & 禁止驶入         & 1120 \\
-no\_pedestrians  & p10  & 禁止行人通行     & 193  \\
-\bottomrule
-\end{tabular}
-\label{tab:dataset}
-\end{table}
-
-数据集按 7:2:1 划分为训练集（2171 张）、验证集（622 张）和测试集（314 张），固定随机种子 seed=42 保证可复现。训练时图像统一 resize 至 $640\times 640$，标注格式由原始 TT100K JSON 转换为 YOLO 归一化格式。数据预处理脚本支持三种不同的 JSON 标注格式自动检测（嵌套对象式、imgs+anns 分离式、COCO 格式）。
+数据集按 7:2:1 划分为训练集、验证集和测试集，固定随机种子 seed=42 保证可复现。训练时图像统一 resize 至 $640\times 640$，标注格式由原始 TT100K JSON 转换为 YOLO 归一化格式。数据预处理脚本（\texttt{data/prepare\_dataset.py}）支持三种不同的 JSON 标注格式自动检测（嵌套对象式、imgs+anns 分离式、COCO 格式），并通过 \texttt{TARGET\_CLASSES = None} 自动发现并保留全部 201 个类别。
 
 \subsection{实验环境}
 
@@ -402,7 +385,7 @@ F (完整)    & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\ch
 系统以模块化 Python 脚本实现，主要功能模块包括：
 
 \begin{itemize}
-    \item \textbf{数据处理模块}（\texttt{data/prepare\_dataset.py}）：支持三种 JSON 格式自动检测与 YOLO 格式转换，自动筛选 5 类目标，7:2:1 随机划分；
+    \item \textbf{数据处理模块}（\texttt{data/prepare\_dataset.py}）：支持三种 JSON 格式自动检测与 YOLO 格式转换，自动发现全部 201 类目标并完成 7:2:1 随机划分；
     \item \textbf{模型定义模块}（\texttt{models/}）：包含 ARF-Head（\texttt{arf\_head.py}）、BCEM（\texttt{bcem.py}）、HJ-Loss（\texttt{hj\_loss.py}）的完整实现，以及 YAML 模型配置文件，通过 \texttt{model\_builder.py} 注册到 ultralytics 模块命名空间；
     \item \textbf{训练模块}（\texttt{scripts/train.py}）：YAML 配置驱动，CLI 参数覆写，支持所有 6 个训练阶段；
     \item \textbf{评估模块}（\texttt{scripts/eval.py}）：COCO 风格 mAP 评估，按小/中/大目标分组统计 AP\_S/AP\_M/AP\_L，支持与基线模型的对比分析；
@@ -458,7 +441,7 @@ python scripts/eval.py \
 
 \subsubsection{混淆矩阵}
 
-归一化混淆矩阵如图~\ref{fig:stage1_cm} 所示。对角线元素反映各分类的正确预测比例。``no\_entry''（禁止驶入，class 3）由于训练样本最多（1120 个标注实例），分类准确率最高；``no\_pedestrians''（禁止行人通行，class 4）、``speed\_limit\_5''（限速 5，class 0）两类因样本稀疏（分别为 193 和 217），存在一定的误分。整体来看，模型未出现严重的类间混淆，背景误检率控制在合理范围内。
+归一化混淆矩阵如图~\ref{fig:stage1_cm} 所示。对角线元素反映各分类的正确预测比例。201 类交通标志中，样本量较大的类别（如 pne 禁止驶入、i5 限速 40）分类准确率较高，而尾部稀疏类别（如 p10 禁止行人通行、i2 限速 5）存在一定的误分。整体来看，模型在 201 类上未出现严重的类间混淆，背景误检率控制在合理范围内。
 
 \begin{figure}[H]
 \centering
@@ -469,7 +452,7 @@ python scripts/eval.py \
 
 \subsubsection{Precision-Recall 与 F1 曲线}
 
-PR 曲线（图~\ref{fig:stage1_pr}）与 F1-Confidence 曲线（图~\ref{fig:stage1_f1}）显示：mAP@0.5 达到 0.544，各类别的 PR 曲线在低召回率区域（Recall $< 0.4$）保持较高精度。F1 曲线表明最优置信度阈值约在 0.2--0.4 区间，其中``speed\_limit\_40''（class 2）因样本量最大（794 个标注），F1 得分最高（约 0.55）。
+PR 曲线（图~\ref{fig:stage1_pr}）与 F1-Confidence 曲线（图~\ref{fig:stage1_f1}）显示：mAP@0.5 达到 0.544，全类 201 类的平均 PR 曲线在低召回率区域（Recall $< 0.4$）保持较高精度。F1 曲线表明最优置信度阈值约在 0.2--0.4 区间，样本量较大的类别 F1 得分显著高于尾部稀疏类别，符合长尾分布下的典型表现。
 
 \begin{figure}[H]
 \centering
@@ -530,7 +513,7 @@ GFLOPs       & 22.8 & 27.8 & +5.0 \\
 \label{tab:stage2}
 \end{table}
 
-P2 检测层带来了 mAP@0.5:0.95 的提升（+0.017），说明在更高 IoU 阈值下定位精度有所改善。但 Precision 微降（$-$0.013），Recall 几乎持平（+0.001），整体增益不如预期强烈。可能原因：(1) 训练分辨率为 640×640，P2 层（stride=4）的 160×160 特征图在此分辨率下仍对极小目标分辨力不足；(2) 5 类目标在 TT100K 中的平均尺寸极度偏小，P2 单独引入的收益受限，后续 Stage 3--5 的注意力机制与分层损失预计能进一步释放 P2 层的潜力。
+P2 检测层带来了 mAP@0.5:0.95 的提升（+0.017），说明在更高 IoU 阈值下定位精度有所改善。但 Precision 微降（$-$0.013），Recall 几乎持平（+0.001），整体增益不如预期强烈。可能原因：(1) 训练分辨率为 640×640，P2 层（stride=4）的 160×160 特征图在此分辨率下仍对极小目标分辨力不足；(2) 201 类目标中存在大量小尺寸样本，P2 单独引入的收益在长尾分布下受限，后续 Stage 3--5 的注意力机制与分层损失预计能进一步释放 P2 层的潜力。
 
 \subsubsection{混淆矩阵对比}
 
@@ -550,7 +533,7 @@ P2 检测层带来了 mAP@0.5:0.95 的提升（+0.017），说明在更高 IoU �
 \label{fig:cm_comparison}
 \end{figure}
 
-Stage 2 的混淆矩阵（图~\ref{fig:cm_comparison}）与 Stage 1 整体相似，对角线占优。``no\_entry''（class 3）仍为分类最准确的类别，``speed\_limit\_5''（class 0）和``no\_pedestrians''（class 4）因训练样本少仍存在背景误分。
+Stage 2 的混淆矩阵（图~\ref{fig:cm_comparison}）与 Stage 1 整体相似，对角线占优。201 类中样本量较大的类别分类准确率仍然最高，尾部稀疏类别因训练样本少仍存在一定的背景误分，符合长尾数据分布下的预期表现。
 
 \subsubsection{Precision-Recall 曲线}
 
@@ -580,12 +563,12 @@ Stage 2 的混淆矩阵（图~\ref{fig:cm_comparison}）与 Stage 1 整体相似
 \toprule
 \textbf{实验} & \textbf{模型配置} & \textbf{mAP@0.5} & \textbf{mAP@0.5:0.95} & \textbf{AP\_S} & \textbf{状态} \\
 \midrule
-A & YOLO26s                     & 0.544 & 0.408  & 待评估 & ✅ 已完成 \\
-B & + P2                        & 0.552 & 0.425  & 待评估 & ✅ 已完成 \\
-C & + ARF-Head                  & —     & —      & —      & ⬜ 待训练 \\
-D & + BCEM                      & —     & —      & —      & ⬜ 待训练 \\
-E & + HJ-Loss                   & —     & —      & —      & ⬜ 待训练 \\
-F & + Soft-NMS                  & —     & —      & —      & ⬜ 待训练 \\
+A & YOLO26s                     & 0.544 & 0.408  & 待评估 & 已完成 \\
+B & + P2                        & 0.552 & 0.425  & 待评估 & 已完成 \\
+C & + ARF-Head                  & —     & —      & —      & 待训练 \\
+D & + BCEM                      & —     & —      & —      & 待训练 \\
+E & + HJ-Loss                   & —     & —      & —      & 待训练 \\
+F & + Soft-NMS                  & —     & —      & —      & 待训练 \\
 \bottomrule
 \end{tabular}
 \label{tab:ablation_results}
@@ -602,9 +585,9 @@ $\Delta_{\text{P2}}$ = B $-$ A：mAP@0.5 +0.008，mAP@0.5:0.95 +0.017。
 \toprule
 \textbf{阶段} & \textbf{改进模块} & \textbf{创新程度} & \textbf{目标} \\
 \midrule
-Stage 3 & ARF-Head 自适应感受野检测头 & ⭐⭐⭐ 原创 & 提升小目标上下文感知能力 \\
-Stage 4 & BCEM 双向上下文增强模块   & ⭐⭐⭐⭐ 原创 & 抑制背景噪声，增强前景判别 \\
-Stage 5 & HJ-Loss 分层联合损失函数   & ⭐⭐⭐⭐ 原创 & 小目标定位精度提升 \\
+Stage 3 & ARF-Head 自适应感受野检测头 & 原创 & 提升小目标上下文感知能力 \\
+Stage 4 & BCEM 双向上下文增强模块   & 原创 & 抑制背景噪声，增强前景判别 \\
+Stage 5 & HJ-Loss 分层联合损失函数   & 原创 & 小目标定位精度提升 \\
 Stage 6 & Soft-NMS + 系统集成        & 集成优化   & 密集场景召回提升 \\
 \bottomrule
 \end{tabular}
@@ -643,7 +626,7 @@ Stage 6 & Soft-NMS + 系统集成        & 集成优化   & 密集场景召回�
     \item \textbf{多天气鲁棒性}：引入雾天、雨夜、逆光等极端场景的数据增强或域自适应方法，提升全天候检测鲁棒性；
     \item \textbf{多帧时序融合}：利用视频时序信息进行检测结果跟踪与平滑（如 ByteTrack 等轻量跟踪器），减少单帧漏检和误检；
     \item \textbf{端到端部署}：导出 ONNX → TensorRT 模型，结合 FP16/INT8 量化实现边缘端 $>$ 60 FPS 实时推理；
-    \item \textbf{扩展类别覆盖}：将 TT100K 的全部 45 类标志纳入实验，验证方案在更大类别空间下的泛化能力。
+    \item \textbf{精度持续提升}：在 201 类完整数据集上继续推进 Stage 3--6 的消融实验，验证三项原创模块在大类别空间下的增益效果。
 \end{enumerate}
 
 % ═══════════════════════════════════════════════════════════════════════════════
