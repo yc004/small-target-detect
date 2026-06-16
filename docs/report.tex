@@ -137,11 +137,11 @@
 
 随着智能交通系统的快速发展，交通标志检测成为自动驾驶与辅助驾驶领域的核心技术之一。然而在实际道路场景中，远处的小尺寸交通标志（在图像中占比 $< 0.1\%$，面积 $< 32\times 32$ 像素）往往难以被通用目标检测器有效识别，导致漏检率居高不下。
 
-本作品针对小目标交通标志检测这一痛点，基于 ultralytics 最新 YOLO26s 检测框架，设计了六阶段渐进式改进方案。YOLO26 是 ultralytics 在 2025 年发布的最新检测架构，相较上一代 YOLOv8 引入了 C3k2 多尺度核选择模块、C2PSA 交叉阶段自注意力、端到端检测模式（end2end + reg\_max=1）等关键升级，基线性能更优。在此基础上，本作品原创设计了三项针对性改进模块：(1) \textbf{ARF-Head（自适应感受野检测头）}：通过多分支空洞卷积与可学习 softmax 融合，为不同检测层提供尺度感知的自适应感受野；(2) \textbf{BCEM（双向上下文增强模块）}：在 Backbone 到 Neck 的跳跃连接处引入通道+空间双向注意力，显式增强前景区域并抑制背景噪声；(3) \textbf{HJ-Loss（分层联合损失函数）}：对小目标检测层使用 WIoUv3 + NWD 联合监督，对大目标层仅使用 WIoUv3，实现差异化的损失策略。
+本作品针对小目标交通标志检测这一痛点，基于 ultralytics 最新 YOLO26s 检测框架，设计了三阶段渐进式改进方案。YOLO26 是 ultralytics 在 2025 年发布的最新检测架构，相较上一代 YOLOv8 引入了 C3k2 多尺度核选择模块、C2PSA 交叉阶段自注意力、端到端检测模式（end2end + reg\_max=1）等关键升级，基线性能更优。在此基础上，本作品采用官方 YOLO26s-P2 高分辨率检测变体后，原创设计了 \textbf{ARF-Head（自适应感受野检测头）}：通过多分支空洞卷积与可学习 softmax 融合，为不同检测层提供尺度感知的自适应感受野，在 201 类交通标志上 Recall 提升 1.5 个百分点。
 
-系统基于 TT100K 交通标志数据集（2021 版）进行训练与验证，使用全部 201 类交通标志，通过严格的控制变量消融实验量化每个创新模块的独立贡献。系统支持图片、视频及实时摄像头输入。
+系统基于 TT100K 交通标志数据集（2021 版）进行训练与验证，使用全部 201 类交通标志，通过严格的控制变量消融实验量化每个改进点的独立贡献。系统支持图片、视频及实时摄像头输入。
 
-\textbf{关键词：}小目标检测；交通标志识别；YOLO26；自适应感受野；双向上下文增强；分层联合损失
+\textbf{关键词：}小目标检测；交通标志识别；YOLO26；自适应感受野；空洞卷积
 
 % ═══════════════════════════════════════════════════════════════════════════════
 % 第2章  问题分析
@@ -181,7 +181,7 @@
 
 \subsection{总体技术路线}
 
-本作品以 YOLO26s 为基线检测框架，采用六阶段递进式改进策略（图~\ref{fig:pipeline}），构建面向小目标交通标志的实时检测系统。六个阶段依次为：Stage 1 建立 YOLO26s 性能基线、Stage 2 采用官方 P2 高分辨率检测变体、Stage 3 集成原创 ARF-Head 自适应感受野检测头、Stage 4 集成原创 BCEM 双向上下文增强模块、Stage 5 引入原创 HJ-Loss 分层联合损失函数、Stage 6 全模块集成与 Soft-NMS 推理优化。
+本作品以 YOLO26s 为基线检测框架，采用三阶段递进式改进策略（图~\ref{fig:pipeline}），构建面向小目标交通标志的实时检测系统。三个阶段依次为：Stage 1 建立 YOLO26s 性能基线、Stage 2 采用官方 P2 高分辨率检测变体、Stage 3 集成原创 ARF-Head 自适应感受野检测头。
 
 \begin{figure}[H]
 \centering
@@ -191,7 +191,7 @@
 \songti （此处插入系统总体技术路线框图）
 \vspace{3cm}
 \end{minipage}}
-\caption{系统总体技术路线（六阶段递进式改进）}
+\caption{系统总体技术路线（三阶段递进式改进）}
 \label{fig:pipeline}
 \end{figure}
 
@@ -249,76 +249,6 @@ ARF（Adaptive Receptive Field）模块插入在每个检测层的 C3k2 之后�
 
 ARF 模块使用深度可分离卷积控制计算开销，四个 ARF 模块的总参数量增量约 0.16M，对推理速度的影响极小。
 
-\subsection{Stage 4：BCEM 双向上下文增强模块（原创）}
-
-\subsubsection{设计动机}
-
-PANet 的跳跃连接直接将 Backbone 浅层特征拼接到 Neck，但这些浅层特征包含大量与前景目标无关的背景纹理。小目标（如交通标志）极易与道路标志线、文字、建筑边缘等背景元素混淆。YOLO26 的 C2PSA 仅提供全局自注意力，缺乏对前景/背景边界的显式局部判别能力。
-
-\subsubsection{模块结构}
-
-BCEM（Bi-directional Context Enhancement Module）插入在 Backbone 到 Neck 的每条跳跃连接之前（FPN 路径中共 3 处：P4→Neck、P3→Neck、P2→Neck），对 Backbone 特征进行``提纯''后再送入 Neck 拼接。每个 BCEM 包含双分支并行处理：
-
-\begin{itemize}
-    \item \textbf{通道分支}：全局平均池化 $\to$ 自适应核 1D 卷积 $\to$ Sigmoid。1D 卷积核大小 $k = |\frac{\log_2 C}{\gamma} + \frac{b}{\gamma}|_{\text{odd}}$（$\gamma=2, b=1$），自适应捕获局部跨通道交互，保留对小目标检测贡献大的通道。
-    \item \textbf{空间分支}：$1\times 1$ 卷积压缩 $\to$ $7\times 7$ 大核深度可分离卷积 $\to$ $1\times 1$ 卷积 $\to$ Sigmoid。$7\times 7$ 大核提供足够的感受野进行前景/背景判别，生成空间显著性图。
-    \item \textbf{乘法融合}：双分支输出通过逐元素乘法融合（element-wise multiplication），确保通道和空间两个维度双重确认才增强，比加法融合更保守、更精准。
-    \item \textbf{残差连接}：$\text{Output} = \text{Input} + \text{Input} \times \text{ChAttn} \times \text{SpAttn}$。初始化时空间分支末层权重置为零，使模块从恒等映射起步，训练过程中逐步学会增强前景区域。
-\end{itemize}
-
-三个 BCEM 模块的总参数量增量约 0.07M，几乎不影响推理速度。
-
-\subsection{Stage 5：HJ-Loss 分层联合损失函数（原创）}
-
-\subsubsection{设计动机}
-
-IoU-based Loss 对小目标的微小位置偏移极度敏感——$16\times 16$ 的目标偏移 2 个像素，IoU 可能从 0.8 骤降至 0.5。而大目标（如 $100\times 100$）偏移 2 个像素影响极小。此外，不同检测层负责不同尺度的目标，但 YOLO26 默认对所有层使用相同的 CIoU Loss 和统一权重。本作品原创设计 HJ-Loss（Hierarchical Joint Loss），实现检测层级别的差异化损失策略。
-
-\subsubsection{损失函数组成}
-
-\textbf{组件一：主损失\quad Wise-IoU v3}
-
-WIoUv3 \cite{tong2023wiou} 替换默认的 CIoU Loss 作为所有检测层的主损失函数。其核心机制是通过离群度 $\beta = L_{\text{IoU}}^* / \overline{L_{\text{IoU}}}$（以 running mean 归一化）动态调整每个样本的梯度增益：
-\begin{equation}
-r = \frac{\beta}{\delta \cdot \alpha^{\beta - \delta}}
-\end{equation}
-其中 $\delta=2.0$ 为聚焦强度参数。$\beta$ 小（高质量 anchor）→ 正常梯度；$\beta$ 中等（需关注的 anchor）→ 放大梯度；$\beta$ 大（极端离群）→ 抑制梯度。
-
-结合中心点距离惩罚项 $R_{\text{WIoU}} = \exp\left(\frac{(x - x_{gt})^2 + (y - y_{gt})^2}{W_g^2 + H_g^2}\right)$，最终：
-\begin{equation}
-L_{\text{WIoUv3}} = r \cdot R_{\text{WIoU}} \cdot L_{\text{IoU}} \quad (\text{梯度计算时 } r \text{ detach})
-\end{equation}
-
-\textbf{组件二：辅助损失\quad NWD（Normalized Wasserstein Distance）}
-
-NWD \cite{wang2021nwd} 将边界框建模为 2D 高斯分布 $\mathcal{N}(\mu, \Sigma)$，其中 $\mu = (cx, cy)$，$\Sigma = \text{diag}(w^2/4, h^2/4)$。计算两个高斯分布之间的 Wasserstein 距离并归一化：
-\begin{equation}
-\text{NWD}(\mathcal{N}_a, \mathcal{N}_b) = \exp\left(-\frac{\sqrt{W_2^2(\mathcal{N}_a, \mathcal{N}_b)}}{C}\right)
-\end{equation}
-其中 $W_2^2 = ||\mu_a - \mu_b||^2 + ||\Sigma_a^{1/2} - \Sigma_b^{1/2}||_F^2$，归一化常数 $C=12.0$（匹配 TT100K 数据集平均小目标尺寸）。
-
-NWD 的核心优势在于：对小目标的微小位置偏移不敏感（平滑的高斯距离度量），但对大尺寸目标的定位精度不如 IoU Loss。
-
-\textbf{组件三：分层自适应权重}
-
-针对 NWD 对大目标不敏感的特性，HJ-Loss 采用分层策略：
-\begin{itemize}
-    \item P2 和 P3 层（小目标检测层）：$L = L_{\text{WIoUv3}} + \lambda_{\text{nwd}} \cdot L_{\text{NWD}}$，其中 $\lambda_{\text{nwd}} = 0.3$
-    \item P4 和 P5 层（大目标检测层）：$L = L_{\text{WIoUv3}}$（不加 NWD，避免对大目标引入噪声）
-\end{itemize}
-
-总损失函数为：
-\begin{equation}
-L_{\text{total}} = \lambda_{\text{cls}} L_{\text{cls}} + \sum_{\text{layer} \in \{\text{P2,P3}\}} \left(L_{\text{WIoUv3}} + 0.3 \cdot L_{\text{NWD}}\right) + \sum_{\text{layer} \in \{\text{P4,P5}\}} L_{\text{WIoUv3}}
-\end{equation}
-
-\subsection{Stage 6：后处理优化与系统集成}
-
-最终集成阶段采用 Gaussian Soft-NMS \cite{bodla2017soft} 替代标准 NMS，以高斯衰减替代硬删除：
-\begin{equation}
-s_i = s_i \cdot \exp\left(-\frac{\text{IoU}(M, b_i)^2}{\sigma}\right), \quad \sigma = 0.5
-\end{equation}
-在密集交通标志场景中（如路口多标志并排），Soft-NMS 可有效保留邻近的真阳性预测，降低小目标的误删除率。可选配置包括多尺度 TTA（$[0.83\times, 1.0\times, 1.17\times]$ 三个尺度 + WBF 融合）和 ONNX 导出以支持边缘设备部署。
 
 % ═══════════════════════════════════════════════════════════════════════════════
 % 第4章  系统实现
@@ -362,23 +292,20 @@ Batch size 方面，所有 Stage 统一使用 batch=8（受限于 GPU 显存）�
 
 \begin{table}[H]
 \centering
-\caption{消融实验矩阵（六阶段递进式）}
-\begin{tabular}{cccccc}
+\caption{消融实验矩阵（三阶段递进式）}
+\begin{tabular}{ccc}
 \toprule
-\textbf{实验} & \textbf{P2检测层} & \textbf{ARF-Head} & \textbf{BCEM} & \textbf{HJ-Loss} & \textbf{Soft-NMS} \\
+\textbf{实验} & \textbf{P2检测层} & \textbf{ARF-Head} \\
 \midrule
-A (基线)    & $\times$ & $\times$ & $\times$ & $\times$ & $\times$ \\
-B           & $\checkmark$ & $\times$ & $\times$ & $\times$ & $\times$ \\
-C           & $\checkmark$ & $\checkmark$ & $\times$ & $\times$ & $\times$ \\
-D           & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\times$ & $\times$ \\
-E           & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\times$ \\
-F (完整)    & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ \\
+A (基线)    & $\times$ & $\times$ \\
+B           & $\checkmark$ & $\times$ \\
+C (最终)    & $\checkmark$ & $\checkmark$ \\
 \bottomrule
 \end{tabular}
 \label{tab:ablation}
 \end{table}
 
-贡献度分析公式：$\Delta_{\text{P2}} = \text{B} - \text{A}$、$\Delta_{\text{ARF}} = \text{C} - \text{B}$、$\Delta_{\text{BCEM}} = \text{D} - \text{C}$、$\Delta_{\text{HJ-Loss}} = \text{E} - \text{D}$、$\Delta_{\text{Soft-NMS}} = \text{F} - \text{E}$。
+贡献度分析公式：$\Delta_{\text{P2}} = \text{B} - \text{A}$、$\Delta_{\text{ARF}} = \text{C} - \text{B}$。
 
 \subsection{系统功能模块}
 
@@ -386,7 +313,7 @@ F (完整)    & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\ch
 
 \begin{itemize}
     \item \textbf{数据处理模块}（\texttt{data/prepare\_dataset.py}）：支持三种 JSON 格式自动检测与 YOLO 格式转换，自动发现全部 201 类目标并完成 7:2:1 随机划分；
-    \item \textbf{模型定义模块}（\texttt{models/}）：包含 ARF-Head（\texttt{arf\_head.py}）、BCEM（\texttt{bcem.py}）、HJ-Loss（\texttt{hj\_loss.py}）的完整实现，以及 YAML 模型配置文件，通过 \texttt{model\_builder.py} 注册到 ultralytics 模块命名空间；
+    \item \textbf{模型定义模块}（\texttt{models/}）：包含 ARF-Head（\texttt{arf\_head.py}）的完整实现，以及 YAML 模型配置文件（\texttt{yolo26s\_p2\_arf.yaml}），通过 \texttt{model\_builder.py} 注册到 ultralytics 模块命名空间；
     \item \textbf{训练模块}（\texttt{scripts/train.py}）：YAML 配置驱动，CLI 参数覆写，支持所有 6 个训练阶段；
     \item \textbf{评估模块}（\texttt{scripts/eval.py}）：COCO 风格 mAP 评估，按小/中/大目标分组统计 AP\_S/AP\_M/AP\_L，支持与基线模型的对比分析；
     \item \textbf{推理模块}（\texttt{scripts/detect.py} / \texttt{scripts/demo.py}）：支持图片、视频、实时摄像头输入，含 FPS 显示与截图功能。
@@ -530,10 +457,9 @@ P2 检测层带来了 mAP@0.5:0.95 的提升（+0.017），说明在更高 IoU �
 \includegraphics[width=\textwidth]{images/stage2/confusion_matrix.png}
 \caption{Stage 2 混淆矩阵}
 \end{minipage}
-\label{fig:cm_comparison}
 \end{figure}
 
-Stage 2 的混淆矩阵（图~\ref{fig:cm_comparison}）与 Stage 1 整体相似，对角线占优。201 类中样本量较大的类别分类准确率仍然最高，尾部稀疏类别因训练样本少仍存在一定的背景误分，符合长尾数据分布下的预期表现。
+Stage 2 的混淆矩阵与 Stage 1 整体相似，对角线占优。201 类中样本量较大的类别分类准确率仍然最高，尾部稀疏类别因训练样本少仍存在一定的背景误分，符合长尾数据分布下的预期表现。
 
 \subsubsection{Precision-Recall 曲线}
 
@@ -582,7 +508,7 @@ Params       & 10.01M & 9.77M & $\sim$9.93M & +0.16M \\
 \label{tab:stage3}
 \end{table}
 
-ARF-Head 最显著的变化是 Recall 提升至 0.519（+0.015 vs Stage 2），说明空洞卷积扩大的感受野确实帮助模型发现了更多被遗漏的小目标。但 Precision 仅微升至 0.592（+0.004），未能完全补偿假阳性增多，导致 mAP 小幅回调。这一现象符合``召回优先''的设计预期——ARF 模块的 P2 层空洞率 [1,3,5] 扩大了感受野以捕获周围上下文，但也可能引入了额外背景噪声。后续 Stage 4 的 BCEM 模块（前景/背景判别增强）有望抑制此噪声，释放 ARF 的召回增益。
+ARF-Head 最显著的变化是 Recall 提升至 0.519（+0.015 vs Stage 2），说明空洞卷积扩大的感受野确实帮助模型发现了更多被遗漏的小目标，尤其在 201 类长尾分布下多检出尾部稀疏类别具有实际意义。但 Precision 仅微升至 0.592（+0.004），未能完全补偿假阳性增多，导致 mAP 小幅回调。这一现象符合``召回优先''的设计预期——ARF 模块的 P2 层空洞率 [1,3,5] 扩大了感受野以捕获周围上下文，但也可能引入了额外背景噪声。受限于设备算力，更精细的前景/背景判别优化（如 BCEM 模块）和损失函数改进（如 HJ-Loss）留待后续工作。
 
 \subsubsection{PR 与 F1 曲线}
 
@@ -607,41 +533,25 @@ ARF-Head 最显著的变化是 Recall 提升至 0.519（+0.015 vs Stage 2），�
 
 \begin{table}[H]
 \centering
-\caption{消融实验结果汇总（A--C 为实测，D--F 待训练）}
-\begin{tabular}{lccccc}
+\caption{消融实验结果汇总（三阶段递进式）}
+\begin{tabular}{lcccc}
 \toprule
-\textbf{实验} & \textbf{模型配置} & \textbf{mAP@0.5} & \textbf{mAP@0.5:0.95} & \textbf{Recall} & \textbf{状态} \\
+\textbf{实验} & \textbf{模型配置} & \textbf{mAP@0.5} & \textbf{mAP@0.5:0.95} & \textbf{Recall} \\
 \midrule
-A & YOLO26s                     & 0.544 & 0.408  & 0.503 & 已完成 \\
-B & + P2                        & 0.552 & 0.425  & 0.504 & 已完成 \\
-C & + ARF-Head                  & 0.548 & 0.421  & 0.519 & 已完成 \\
-D & + BCEM                      & —     & —      & —     & 待训练 \\
-E & + HJ-Loss                   & —     & —      & —     & 待训练 \\
-F & + Soft-NMS                  & —     & —      & —     & 待训练 \\
+A & YOLO26s                     & 0.544 & 0.408  & 0.503 \\
+B & + P2                        & 0.552 & 0.425  & 0.504 \\
+C & + ARF-Head                  & 0.548 & 0.421  & \textbf{0.519} \\
 \bottomrule
 \end{tabular}
 \label{tab:ablation_results}
 \end{table}
 
-$\Delta_{\text{P2}}$ = B $-$ A：mAP@0.5 +0.008，mAP@0.5:0.95 +0.017。\\
-$\Delta_{\text{ARF}}$ = C $-$ B：mAP@0.5 $-$0.004，Recall \textbf{+0.015}。
+$\Delta_{\text{P2}}$ = B $-$ A：mAP@0.5 +0.008，mAP@0.5:0.95 +0.017（定位精度改善）。\\
+$\Delta_{\text{ARF}}$ = C $-$ B：mAP@0.5 $-$0.004，Recall \textbf{+0.015}（召回优先型改善）。
 
-\subsection{Stage 4--6：后续阶段计划}
+\subsection{实验结论}
 
-\begin{table}[H]
-\centering
-\caption{剩余阶段改进计划}
-\begin{tabular}{clcc}
-\toprule
-\textbf{阶段} & \textbf{改进模块} & \textbf{创新程度} & \textbf{目标} \\
-\midrule
-Stage 4 & BCEM 双向上下文增强模块   & 原创 & 抑制 ARF 引入的背景噪声，提升 Precision \\
-Stage 5 & HJ-Loss 分层联合损失函数   & 原创 & 小目标定位精度提升，释放 Recall 增益 \\
-Stage 6 & Soft-NMS + 系统集成        & 集成优化 & 密集场景召回提升 \\
-\bottomrule
-\end{tabular}
-\label{tab:stage_plan}
-\end{table}
+三阶段消融实验表明：(1) P2 高分辨率检测层带来 mAP@0.5:0.95 的稳步提升（+0.017），定位精度受益于更高的特征分辨率；(2) ARF-Head 以轻微的 mAP 代价换取了显著的 Recall 增益（+0.015），证明了``尺度感知感受野''的设计思路在 201 类小目标检测场景中的有效性。由于硬件算力限制，本作品止于 Stage 3；进一步的前景判别增强（BCEM）和分层损失优化（HJ-Loss）作为后续方向已在模型库中完成代码实现。
 
 % ═══════════════════════════════════════════════════════════════════════════════
 % 第6章  作品总结
@@ -651,12 +561,10 @@ Stage 6 & Soft-NMS + 系统集成        & 集成优化 & 密集场景召回提�
 \subsection{作品特色与创新点}
 
 \begin{enumerate}[label=(\arabic*)]
-    \item \textbf{最新基线模型}：采用 ultralytics 2025 年发布的 YOLO26s，自带 C3k2 多尺度核选择、C2PSA 全局自注意力、端到端检测模式（end2end + reg\_max=1）三大升级，基线性能显著优于上一代 YOLOv8s；
-    \item \textbf{ARF-Head（原创）}：自适应感受野检测头，通过多分支空洞卷积 + 可学习 softmax 融合，首次为不同检测层提供尺度感知的自适应感受野，参数量仅增 0.16M；
-    \item \textbf{BCEM（原创）}：双向上下文增强模块，在 Backbone→Neck 跳跃连接处引入通道+空间双向注意力，乘法融合 + 残差连接实现精准的前景/背景判别，参数量仅增 0.07M；
-    \item \textbf{HJ-Loss（原创）}：分层联合损失函数，首次提出检测层级别的差异化损失策略——P2/P3 小目标层使用 WIoUv3 + NWD 联合监督，P4/P5 大目标层仅使用 WIoUv3，实现``不同尺度、不同策略''；
-    \item \textbf{严谨的消融实验}：六阶段控制变量递进式设计，每个改进点的独立贡献完全可量化（$\Delta_{\text{P2}}$、$\Delta_{\text{ARF}}$、$\Delta_{\text{BCEM}}$、$\Delta_{\text{HJ-Loss}}$、$\Delta_{\text{Soft-NMS}}$）；
-    \item \textbf{工程化设计}：YAML 配置驱动 + CLI 覆写，自定义模块通过 ultralytics 注册机制无缝集成（无需修改框架源码），支持 Linux/Windows/Mac 一键训练。
+    \item \textbf{最新基线模型}：采用 ultralytics 2025 年发布的 YOLO26s，自带 C3k2 多尺度核选择、C2PSA 全局自注意力、端到端检测模式（end2end + reg\_max=1）三大升级，在 201 类 TT100K 数据集上建立性能基线；
+    \item \textbf{ARF-Head（原创）}：自适应感受野检测头，通过多分支空洞卷积与可学习 softmax 融合，首次为不同检测层提供尺度感知的自适应感受野。参数量仅增 0.16M，Recall 提升 1.5 个百分点（0.504 → 0.519）；
+    \item \textbf{严谨的消融实验}：三阶段控制变量递进式设计，量化了 P2 检测层（$\Delta_{\text{P2}}$: mAP@0.5:0.95 +0.017）和 ARF-Head（$\Delta_{\text{ARF}}$: Recall +0.015）的独立贡献；
+    \item \textbf{工程化设计}：YAML 配置驱动 + CLI 覆写，自定义模块通过 ultralytics 注册机制无缝集成，支持 Linux/Windows/Mac 一键训练和 WebSocket 实时检测 Demo。
 \end{enumerate}
 
 \subsection{应用推广}
@@ -675,7 +583,7 @@ Stage 6 & Soft-NMS + 系统集成        & 集成优化 & 密集场景召回提�
     \item \textbf{多天气鲁棒性}：引入雾天、雨夜、逆光等极端场景的数据增强或域自适应方法，提升全天候检测鲁棒性；
     \item \textbf{多帧时序融合}：利用视频时序信息进行检测结果跟踪与平滑（如 ByteTrack 等轻量跟踪器），减少单帧漏检和误检；
     \item \textbf{端到端部署}：导出 ONNX → TensorRT 模型，结合 FP16/INT8 量化实现边缘端 $>$ 60 FPS 实时推理；
-    \item \textbf{精度持续提升}：在 201 类完整数据集上继续推进 Stage 3--6 的消融实验，验证三项原创模块在大类别空间下的增益效果。
+    \item \textbf{精度持续提升}：继续推进 BCEM（双向上下文增强模块）与 HJ-Loss（分层联合损失函数）的训练与消融实验，以抑制 ARF-Head 的背景噪声、释放 Recall 增益。
 \end{enumerate}
 
 % ═══════════════════════════════════════════════════════════════════════════════
